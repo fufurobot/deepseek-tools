@@ -2,7 +2,7 @@
 """
 git-commit-from-clipboard.py
 Reads the clipboard and commits with that message.
-Usage: python git-commit-from-clipboard.py
+If nothing to commit, runs `git commit --amend` instead.
 """
 
 import subprocess
@@ -30,20 +30,44 @@ def main():
         temp_path = f.name
 
     try:
-        # Run git commit with the temp file as the message source
+        # First attempt: normal commit
         result = subprocess.run(
             ["git", "commit", "-F", temp_path],
             capture_output=True,
             text=True
         )
-        # Print output
+
+        # If successful, print and exit
         if result.returncode == 0:
             print("Commit successful:")
             print(result.stdout)
+            return
+        print("Commit Failed")
+        print(result.stdout)
+        # Check if the failure is because there's nothing to commit
+        stderr = result.stderr.lower()
+        if "nothing to commit" in stderr or "nothing added to commit" in stderr:
+            print("Nothing to commit – amending last commit instead.")
+            # Retry with --amend
+            amend_result = subprocess.run(
+                ["git", "commit", "--amend", "-F", temp_path],
+                capture_output=True,
+                text=True
+            )
+            if amend_result.returncode == 0:
+                print("Amend successful:")
+                print(amend_result.stdout)
+                return
+            else:
+                print("Amend failed:")
+                print(amend_result.stderr, file=sys.stderr)
+                sys.exit(amend_result.returncode)
         else:
+            # Some other error
             print("Commit failed:")
             print(result.stderr, file=sys.stderr)
             sys.exit(result.returncode)
+
     finally:
         # Remove the temporary file
         os.unlink(temp_path)
