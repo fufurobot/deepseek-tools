@@ -42,11 +42,10 @@ def main():
             print("Commit successful:")
             print(result.stdout)
             return
-        print("Commit Failed")
-        print(result.stdout)
-        # Check if the failure is because there's nothing to commit
-        stderr = result.stderr.lower()
-        if "nothing to commit" in stderr or "nothing added to commit" in stderr:
+
+        # Combine stdout and stderr for detection
+        output = result.stdout + result.stderr
+        if "nothing to commit" in output or "nothing added to commit" in output:
             print("Nothing to commit – amending last commit instead.")
             # Retry with --amend
             amend_result = subprocess.run(
