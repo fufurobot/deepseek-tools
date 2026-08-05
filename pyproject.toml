@@ -1,0 +1,21 @@
+[project]
+name = "deepseek-tools"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "fufu", email = "fufurobot@outlook.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "playwright>=1.58.0",
+    "pynput>=1.8.1",
+    "pyperclip>=1.11.0",
+]
+
+[project.scripts]
+clip-commit = "deepseek_tools.clip_commit:main"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
