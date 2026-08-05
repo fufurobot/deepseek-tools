@@ -45,7 +45,15 @@ def main():
 
         # Combine stdout and stderr for detection
         output = result.stdout + result.stderr
-        if "nothing to commit" in output or "nothing added to commit" in output:
+
+        # Check for various "nothing to commit" messages
+        no_commit_phrases = [
+            "nothing to commit",
+            "nothing added to commit",
+            "no changes added to commit"
+        ]
+
+        if any(phrase in output for phrase in no_commit_phrases):
             print("Nothing to commit – amending last commit instead.")
             # Retry with --amend
             amend_result = subprocess.run(
