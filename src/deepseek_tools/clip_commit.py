@@ -57,7 +57,7 @@ def main():
             print("Nothing to commit – amending last commit instead.")
             # Retry with --amend
             amend_result = subprocess.run(
-                ["git", "commit", "--amend", "-F", temp_path],
+                ["git", "commit", "--amend", "-m", temp_path],
                 capture_output=True,
                 text=True
             )
