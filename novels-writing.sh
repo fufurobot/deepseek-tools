@@ -1,0 +1,1 @@
+uv run --with pynput python -c "import time; time.sleep(5); from pynput.keyboard import Key, Controller; k=Controller(); any(k.type('search other cases. next chapter') or time.sleep(1) or k.press(Key.enter) or k.release(Key.enter) or time.sleep(2*60) or print(i) for i in iter(int, 1))"
