@@ -1,0 +1,3 @@
+[submodule "src/deepseek_tools/official/DeepSeek-V4-Flash"]
+	path = src/deepseek_tools/official/deepseek_v4_flash
+	url = https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash
