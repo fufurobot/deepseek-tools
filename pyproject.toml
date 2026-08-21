@@ -20,7 +20,8 @@ dependencies = [
 clip-commit = "deepseek_tools.clip_commit:main"
 concat-repo = "deepseek_tools.concat_repo:main"
 auto-commit = "deepseek_tools.git_auto_commit:main"
-git_cloner = "deepseek_tools.git_cloner:main"
+git-cloner = "deepseek_tools.git_cloner:main"
+ollama-finetuner = "deepseek_tools.ollama_finetuner:main"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
