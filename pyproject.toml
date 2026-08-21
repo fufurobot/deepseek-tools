@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "dsh-python-bridge>=0.0.1",
     "jinja2>=3.1.6",
     "playwright>=1.58.0",
     "pynput>=1.8.1",
