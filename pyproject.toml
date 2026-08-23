@@ -22,6 +22,7 @@ concat-repo = "deepseek_tools.concat_repo:main"
 auto-commit = "deepseek_tools.git_auto_commit:main"
 git-cloner = "deepseek_tools.git_cloner:main"
 ollama-finetuner = "deepseek_tools.ollama_finetuner:main"
+rwkv7-trainer = "deepseek_tools.rwkv7_trainer:main"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
