@@ -123,7 +123,8 @@ def get_git_diff() -> str:
 
 def generate_commit_message(diff_output: str, model: str, prompt_template: Optional[str] = None) -> Optional[str]:
     """
-    Send diff to Ollama and generate commit message.
+    Send diff to Ollama and generate commit message using a streaming response.
+    Tokens are echoed to the user as they arrive.
     """
     if not diff_output.strip():
         print("No staged changes detected. Please stage changes with 'git add'.")
@@ -132,7 +133,7 @@ def generate_commit_message(diff_output: str, model: str, prompt_template: Optio
     # Use template or default
     if prompt_template is None:
         prompt_template = get_default_prompt_template()
-    
+
     # Render template with diff output
     try:
         template = Template(prompt_template)
@@ -141,35 +142,73 @@ def generate_commit_message(diff_output: str, model: str, prompt_template: Optio
         print(f"Error rendering template: {e}")
         return None
 
-    # Prepare Ollama request
+    # Prepare Ollama request with streaming enabled
     url = "http://localhost:11434/api/generate"
     payload = {
         "model": model,
         "prompt": prompt,
-        "stream": False,
+        "stream": True,
         "options": {
             "temperature": 0.3,  # Lower temperature for more deterministic output
             "top_p": 0.9,
-            "max_tokens": 200
-        }
+            "max_tokens": 200,
+        },
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=30)
+        # (connect_timeout, read_timeout). With streaming, the read timeout
+        # applies *between chunks*, not to the total response time, so we can
+        # afford to be generous without hanging forever on a dead connection.
+        response = requests.post(
+            url, json=payload, stream=True, timeout=(10, 120)
+        )
         response.raise_for_status()
-        
-        result = response.json()
-        commit_message = result.get("response", "").strip()
-        
-        # Clean up the response - remove extra whitespace and quotes
+
+        print(f"Generating commit message using {model}...\n")
+        print("-" * 50)
+
+        chunks: List[str] = []
+        try:
+            # Ollama streams newline-delimited JSON objects. Each chunk has a
+            # "response" field with the next piece of text and a "done" flag.
+            for line in response.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    # Ignore any malformed keep-alive/partial lines
+                    continue
+
+                token = data.get("response", "")
+                if token:
+                    chunks.append(token)
+                    # Echo the token immediately so the user sees progress
+                    sys.stdout.write(token)
+                    sys.stdout.flush()
+
+                if data.get("done", False):
+                    break
+        except KeyboardInterrupt:
+            print("\n\nInterrupted by user.")
+            return None
+        finally:
+            response.close()
+
+        # Finish the streamed line
+        print()
+        print("-" * 50)
+
+        commit_message = "".join(chunks).strip()
+        # Clean up the response - remove surrounding quotes if present
         commit_message = re.sub(r'^["\']|["\']$', '', commit_message)
-        
+
         if not commit_message:
             print("No commit message generated.")
             return None
-            
+
         return commit_message
-        
+
     except requests.exceptions.ConnectionError:
         print("Error: Cannot connect to Ollama. Is it running? (http://localhost:11434)")
         return None
