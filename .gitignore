@@ -1,5 +1,11 @@
 **/.ipynb_checkpoints
 data
+
+# Notebook scratch outputs / large mined data dumps (not source)
+notebooks/*.csv
+notebooks/*.ico
+notebooks/*.pyc
+notebooks/data
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
