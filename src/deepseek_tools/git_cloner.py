@@ -5,6 +5,7 @@ and infinite retry capability.
 """
 
 import os
+import re
 import sys
 import subprocess
 import time
@@ -30,33 +31,48 @@ class GitRepoCloner:
     def parse_repo_url(self, url: str) -> Tuple[str, str]:
         """
         Parse git URL to extract namespace and repository name.
-        
+
+        Handles both standard URLs and scp-style SSH shorthand, so that the
+        SSH and HTTPS forms of the same repository resolve to one local path.
+
         Args:
-            url: Git repository URL (HTTPS or SSH)
-            
+            url: Git repository URL (HTTPS, SSH or scp-style)
+
         Returns:
             Tuple of (namespace_path, repo_name)
         """
-        parsed = urlparse(url)
-        
-        # Get the path and remove leading/trailing slashes
-        path = parsed.path.strip('/')
-        
-        # Remove .git suffix if present
-        if path.endswith('.git'):
+        url = url.strip()
+
+        # scp-style shorthand: [user@]host:path/to/repo.git
+        # `urlparse` does not understand this form and would fold the whole
+        # "user@host:" prefix into the path, so it is handled explicitly.
+        if "://" not in url:
+            match = re.match(r"^(?:[^@/]+@)?[^:/]+:(?P<path>.+)$", url)
+            if match:
+                path = match.group("path")
+            else:
+                path = url
+        else:
+            parsed = urlparse(url)
+            path = parsed.path
+
+        # Normalise the path portion.
+        path = path.strip().strip("/")
+        if path.endswith(".git"):
             path = path[:-4]
-        
-        # Split path into components
-        parts = path.split('/')
-        
+
+        if not path:
+            return "", ""
+
+        # Split path into components.
+        parts = [p for p in path.split("/") if p]
+
         if len(parts) == 1:
             # Just a repo name, no namespace
             return "", parts[0]
-        else:
-            # Namespace is everything except the last part (repo name)
-            namespace = '/'.join(parts[:-1])
-            repo_name = parts[-1]
-            return namespace, repo_name
+
+        # Namespace is everything except the last part (repo name)
+        return "/".join(parts[:-1]), parts[-1]
 
     def get_repo_path(self, url: str) -> Path:
         """
