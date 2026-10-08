@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The DeepSeek-V4-Flash submodule points at a large Hugging Face
+          # repository and is not needed to run the test suite.
+          submodules: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install the project and dev dependencies
+        # The `gui` group (pyautogui) is intentionally excluded: it needs a
+        # desktop session and platform-specific build steps.
+        run: uv sync --locked --group dev --python ${{ matrix.python-version }}
+
+      - name: Run the test suite
+        run: uv run --no-sync pytest -p no:cacheprovider -q
+
+      - name: Upload test output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-output-${{ matrix.os }}-${{ matrix.python-version }}
+          path: |
+            .pytest_cache/
+            *.log
+          if-no-files-found: ignore
+          retention-days: 7

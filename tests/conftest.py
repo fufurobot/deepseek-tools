@@ -183,11 +183,19 @@ def _root_parent() -> Path:
 def pytest_configure(config: pytest.Config) -> None:
     """Install sandbox-safe temporary directory handling.
 
+    The workarounds below compensate for a Windows-specific interaction
+    between pytest's POSIX ``mode=0o700`` temp directories and a confined
+    file sandbox. On other platforms pytest's own behaviour is correct and
+    well tested, so the patches are applied only on Windows.
+
     The base temporary directory is deliberately *not* created here: this hook
     runs before a confined sandbox has granted workspace write access, and a
     directory created at that moment is born unlistable. Creation happens
     lazily on first use instead.
     """
+    if os.name != "nt":
+        return
+
     _patch_pytest_tempdir()
     _patch_cleanup()
     _patch_temp_factory()
