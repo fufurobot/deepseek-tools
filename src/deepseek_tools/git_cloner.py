@@ -6,6 +6,7 @@ and infinite retry capability.
 
 import os
 import re
+import shutil
 import sys
 import subprocess
 import time
@@ -16,17 +17,28 @@ from typing import List, Optional, Tuple
 
 
 class GitRepoCloner:
-    def __init__(self, base_dir: str = "repos", retry_delay: int = 5):
+    def __init__(self, base_dir: str = "repos", retry_delay: int = 5,
+                 max_retries: Optional[int] = None):
         """
         Initialize the GitRepoCloner.
-        
+
         Args:
             base_dir: Base directory where repos will be cloned
             retry_delay: Delay in seconds between retries
+            max_retries: Maximum attempts per repository. ``None`` (the
+                default) preserves the historical retry-forever behaviour;
+                pass a positive integer to fail fast instead of hanging.
         """
         self.base_dir = Path(base_dir)
         self.retry_delay = retry_delay
+        self.max_retries = max_retries
         self.base_dir.mkdir(parents=True, exist_ok=True)
+
+    def _should_retry(self, attempt: int) -> bool:
+        """Return True when another attempt is allowed for *attempt*."""
+        if self.max_retries is None:
+            return True
+        return attempt < self.max_retries
 
     def parse_repo_url(self, url: str) -> Tuple[str, str]:
         """
@@ -122,27 +134,28 @@ class GitRepoCloner:
 
     def clone_or_update_repo(self, url: str) -> bool:
         """
-        Clone or update a repository with infinite retry.
-        
+        Clone or update a repository, retrying on failure.
+
         Args:
             url: Git repository URL
-            
+
         Returns:
-            True if successful, False if failed (shouldn't happen with infinite retry)
+            True if successful. False only when ``max_retries`` is set and all
+            attempts are exhausted; with the default (unbounded) setting this
+            never returns False.
         """
         repo_path = self.get_repo_path(url)
-        
+
         # Check if repository already exists
         if repo_path.exists():
             print(f"Repository exists at {repo_path}, pulling latest changes...")
-            
+
             # Check if it's a git repository
             git_dir = repo_path / '.git'
             if not git_dir.exists():
                 print(f"❌ {repo_path} exists but is not a git repository. Please remove it manually.")
                 return False
-            
-            # Pull with infinite retry
+
             attempt = 1
             while True:
                 print(f"  Attempt {attempt}: git pull")
@@ -150,18 +163,21 @@ class GitRepoCloner:
                 if success:
                     print(f"✅ Successfully updated {url} at {repo_path}")
                     return True
-                else:
-                    print(f"❌ Pull failed: {output.strip()}")
-                    print(f"⏳ Retrying in {self.retry_delay} seconds...")
-                    time.sleep(self.retry_delay)
-                    attempt += 1
+
+                print(f"❌ Pull failed: {output.strip()}")
+                if not self._should_retry(attempt):
+                    print(f"❌ Giving up on {url} after {attempt} attempt(s).")
+                    return False
+                print(f"⏳ Retrying in {self.retry_delay} seconds...")
+                time.sleep(self.retry_delay)
+                attempt += 1
         else:
-            # Clone with infinite retry
+            # Clone with retry
             print(f"Cloning {url} to {repo_path}...")
-            
+
             # Create parent directories if they don't exist
             repo_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             attempt = 1
             while True:
                 print(f"  Attempt {attempt}: git clone")
@@ -169,11 +185,17 @@ class GitRepoCloner:
                 if success:
                     print(f"✅ Successfully cloned {url} to {repo_path}")
                     return True
-                else:
-                    print(f"❌ Clone failed: {output.strip()}")
-                    print(f"⏳ Retrying in {self.retry_delay} seconds...")
-                    time.sleep(self.retry_delay)
-                    attempt += 1
+
+                print(f"❌ Clone failed: {output.strip()}")
+                # A partially created destination blocks every later attempt.
+                if repo_path.exists() and not (repo_path / '.git').exists():
+                    shutil.rmtree(repo_path, ignore_errors=True)
+                if not self._should_retry(attempt):
+                    print(f"❌ Giving up on {url} after {attempt} attempt(s).")
+                    return False
+                print(f"⏳ Retrying in {self.retry_delay} seconds...")
+                time.sleep(self.retry_delay)
+                attempt += 1
 
     def process_repos(self, repo_urls: List[str]) -> None:
         """
@@ -276,6 +298,12 @@ Input file format (one URL per line, lines starting with # are ignored):
         help='Retry delay in seconds (default: 5)'
     )
     parser.add_argument(
+        '--max-retries',
+        type=int,
+        default=None,
+        help='Maximum attempts per repository (default: retry forever)'
+    )
+    parser.add_argument(
         '--version',
         action='version',
         version='git-clone-multi 1.0.0'
@@ -299,7 +327,11 @@ Input file format (one URL per line, lines starting with # are ignored):
         sys.exit(1)
     
     # Create cloner instance and process repositories
-    cloner = GitRepoCloner(base_dir=args.output, retry_delay=args.delay)
+    cloner = GitRepoCloner(
+        base_dir=args.output,
+        retry_delay=args.delay,
+        max_retries=args.max_retries,
+    )
     cloner.process_repos(urls)
 
 

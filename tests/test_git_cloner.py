@@ -86,13 +86,8 @@ class TestRunGitCommand:
 
 
 class TestCloneOrUpdateRepo:
-    def test_clones_local_repository(self, tmp_path, monkeypatch):
-        """A local clone exercises the real code path without touching network.
-
-        ``clone_or_update_repo`` retries forever by design, so a failing clone
-        would hang the suite. The retry loop is bounded here by failing the
-        test as soon as more than one attempt is made.
-        """
+    def test_clones_local_repository(self, tmp_path):
+        """A local clone exercises the real code path without touching network."""
         origin = tmp_path / "origin"
         origin.mkdir()
         subprocess.run(["git", "init", "-q", "-b", "main", str(origin)], check=True)
@@ -104,22 +99,9 @@ class TestCloneOrUpdateRepo:
             check=True,
         )
 
-        cloner = GitRepoCloner(base_dir=str(tmp_path / "repos"), retry_delay=0)
-
-        attempts = 0
-        real_run = cloner.run_git_command
-
-        def counting_run(cmd, cwd=None):
-            nonlocal attempts
-            attempts += 1
-            if attempts > 1:
-                raise AssertionError(
-                    "clone_or_update_repo retried; refusing to loop forever"
-                )
-            return real_run(cmd, cwd)
-
-        monkeypatch.setattr(cloner, "run_git_command", counting_run)
-
+        cloner = GitRepoCloner(
+            base_dir=str(tmp_path / "repos"), retry_delay=0, max_retries=2
+        )
         if not cloner.clone_or_update_repo(origin.as_uri()):
             pytest.skip("git clone of a local repository is unavailable here")
 
@@ -130,9 +112,8 @@ class TestCloneOrUpdateRepo:
         """An existing non-git directory must be reported, not retried."""
         base = tmp_path / "repos"
         (base / "user" / "repo").mkdir(parents=True)
-        cloner = GitRepoCloner(base_dir=str(base), retry_delay=0)
+        cloner = GitRepoCloner(base_dir=str(base), retry_delay=0, max_retries=2)
 
-        # A bounded timeout proves the call returns rather than looping.
         result: list[bool] = []
 
         def call() -> None:
@@ -144,6 +125,46 @@ class TestCloneOrUpdateRepo:
 
         assert not thread.is_alive(), "clone_or_update_repo hung in its retry loop"
         assert result == [False]
+
+    def test_max_retries_bounds_a_failing_clone(self, tmp_path):
+        """A clone that can never succeed must return, not spin forever."""
+        cloner = GitRepoCloner(
+            base_dir=str(tmp_path / "repos"), retry_delay=0, max_retries=3
+        )
+        attempts = 0
+
+        def failing_clone(cmd, cwd=None):
+            nonlocal attempts
+            attempts += 1
+            return False, "simulated failure"
+
+        cloner.run_git_command = failing_clone  # type: ignore[method-assign]
+
+        result: list[bool] = []
+        thread = threading.Thread(
+            target=lambda: result.append(
+                cloner.clone_or_update_repo("https://example.invalid/x.git")
+            ),
+            daemon=True,
+        )
+        thread.start()
+        thread.join(timeout=10)
+
+        assert not thread.is_alive(), "clone_or_update_repo ignored max_retries"
+        assert result == [False]
+        assert attempts == 3, f"expected 3 attempts, saw {attempts}"
+
+    def test_retries_forever_by_default(self, tmp_path):
+        """The documented default stays unbounded, so long-running use is safe."""
+        cloner = GitRepoCloner(base_dir=str(tmp_path / "repos"), retry_delay=0)
+        assert cloner.max_retries is None
+        assert cloner._should_retry(1) is True
+        assert cloner._should_retry(10_000) is True
+
+        bounded = GitRepoCloner(
+            base_dir=str(tmp_path / "repos2"), retry_delay=0, max_retries=1
+        )
+        assert bounded._should_retry(1) is False
 
 
 class TestEntryPoint:
