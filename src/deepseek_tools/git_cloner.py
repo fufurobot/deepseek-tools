@@ -44,44 +44,68 @@ class GitRepoCloner:
         """
         Parse git URL to extract namespace and repository name.
 
-        Handles both standard URLs and scp-style SSH shorthand, so that the
-        SSH and HTTPS forms of the same repository resolve to one local path.
+        Handles standard URLs, scp-style SSH shorthand and local paths, so
+        that each remote resolves to one predictable local directory.
 
         Args:
-            url: Git repository URL (HTTPS, SSH or scp-style)
+            url: Git repository URL (HTTPS, SSH, scp-style or local path)
 
         Returns:
-            Tuple of (namespace_path, repo_name)
+            Tuple of (namespace_path, repo_name). Local paths and single-name
+            remotes have an empty namespace.
         """
         url = url.strip()
 
-        # scp-style shorthand: [user@]host:path/to/repo.git
-        # `urlparse` does not understand this form and would fold the whole
-        # "user@host:" prefix into the path, so it is handled explicitly.
+        # Whether this URL names a local directory rather than a network
+        # remote. Local repositories are never namespaced: see below.
+        is_local = "://" not in url or url.startswith("file://")
+
         if "://" not in url:
-            match = re.match(r"^(?:[^@/]+@)?[^:/]+:(?P<path>.+)$", url)
+            # A Windows drive path (C:\src\origin) is local, not scp-style;
+            # the drive letter would otherwise be read as a host name.
+            drive_path = bool(re.match(r"^[A-Za-z]:[\\/]", url))
+            # scp-style shorthand: [user@]host:path/to/repo.git
+            # `urlparse` does not understand this form and would fold the whole
+            # "user@host:" prefix into the path, so it is handled explicitly.
+            match = None if drive_path else re.match(
+                r"^(?:[^@/\\]+@)?[^:/\\]+:(?P<path>.+)$", url
+            )
             if match:
                 path = match.group("path")
+                is_local = False
             else:
+                # A bare local path such as ./repos/origin or C:\src\origin.
                 path = url
         else:
-            parsed = urlparse(url)
-            path = parsed.path
+            path = urlparse(url).path
 
-        # Normalise the path portion.
-        path = path.strip().strip("/")
+        # Record absoluteness before stripping separators, which would
+        # otherwise erase the leading "/" that identifies it.
+        raw = path.replace("\\", "/").strip()
+        is_absolute = raw.startswith("/") or bool(re.match(r"^[A-Za-z]:", raw))
+
+        # Normalise separators and trailing punctuation.
+        path = raw
         if path.endswith(".git"):
             path = path[:-4]
+        path = path.strip("/")
 
         if not path:
             return "", ""
 
-        # Split path into components.
-        parts = [p for p in path.split("/") if p]
+        parts = [p for p in path.split("/") if p and p != "."]
 
+        if not parts:
+            return "", ""
         if len(parts) == 1:
             # Just a repo name, no namespace
             return "", parts[0]
+
+        # Local paths are not namespaces: using the directory tree as one would
+        # make the target depend on the machine, and an absolute path joined
+        # with base_dir would escape base_dir entirely.
+        if is_local and (is_absolute or raw.startswith(".")):
+            return "", parts[-1]
 
         # Namespace is everything except the last part (repo name)
         return "/".join(parts[:-1]), parts[-1]

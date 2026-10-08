@@ -35,6 +35,42 @@ class TestParseRepoUrl:
         cloner = GitRepoCloner(base_dir="unused")
         assert cloner.parse_repo_url(url) == expected
 
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            ("file:///tmp/a/b/origin", ("", "origin")),
+            ("file:///C:/src/origin", ("", "origin")),
+            ("/home/user/src/origin", ("", "origin")),
+            (r"C:\src\origin", ("", "origin")),
+            ("./relative/origin", ("", "origin")),
+        ],
+    )
+    def test_local_paths_have_no_namespace(self, url, expected):
+        """Local repositories must not be namespaced by absolute path.
+
+        Keeping the absolute path as the namespace would make the local
+        directory depend on the machine, and joining it with ``base_dir``
+        would escape ``base_dir`` entirely.
+        """
+        cloner = GitRepoCloner(base_dir="unused")
+        assert cloner.parse_repo_url(url) == expected
+
+    def test_local_path_stays_inside_base_dir(self, tmp_path):
+        cloner = GitRepoCloner(base_dir=str(tmp_path / "repos"))
+        origin = tmp_path / "deep" / "nested" / "origin"
+        resolved = cloner.get_repo_path(origin.as_uri()).resolve()
+        assert resolved == (tmp_path / "repos" / "origin").resolve(), (
+            f"clone target {resolved} escaped the base directory"
+        )
+        assert (tmp_path / "repos").resolve() in resolved.parents
+
+    def test_ssh_and_https_forms_agree(self):
+        """Both forms of one repository must map to a single local path."""
+        cloner = GitRepoCloner(base_dir="unused")
+        assert cloner.parse_repo_url("git@github.com:user/repo.git") == cloner.parse_repo_url(
+            "https://github.com/user/repo.git"
+        )
+
 
 class TestGetRepoPath:
     def test_namespaced_path(self, tmp_path):
@@ -105,7 +141,8 @@ class TestCloneOrUpdateRepo:
         if not cloner.clone_or_update_repo(origin.as_uri()):
             pytest.skip("git clone of a local repository is unavailable here")
 
-        dest = tmp_path / "repos" / "origin"
+        dest = cloner.get_repo_path(origin.as_uri())
+        assert dest == tmp_path / "repos" / "origin"
         assert (dest / "README.md").read_text(encoding="utf-8") == "hello\n"
 
     def test_existing_non_git_directory_fails_without_retry_loop(self, tmp_path):
