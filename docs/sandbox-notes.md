@@ -65,32 +65,35 @@ propagate the failure into unrelated later runs.
 ## Result
 
 ```
-14 passed, 2 failed in 0.44s
+24 passed, 1 skipped
 ```
 
-Both failures are genuine defects in `GitRepoCloner.parse_repo_url`, left red on
-purpose under the TDD flow:
+CI is green on all four matrix jobs (Linux + Windows × Python 3.10 + 3.12).
 
-- scp-style SSH URLs (`git@github.com:user/repo.git`) keep the
-  `git@github.com:` prefix in the namespace, because `urlparse` does not
-  understand that form.
-- Consequently the SSH and HTTPS forms of the same repository map to different
-  local paths.
+The bugs the workarounds exposed, all now fixed:
 
-## Known remaining hazard
+| Bug | Symptom |
+| --- | --- |
+| scp-style SSH URLs | `git@github.com:user/repo.git` kept the host prefix as namespace, so SSH and HTTPS forms mapped to two directories |
+| Local paths as namespaces | `file:///tmp/a/b/origin` cloned to `<base_dir>/tmp/a/b/origin`; on POSIX an absolute path **discards `base_dir`**, escaping it entirely |
+| Unbounded retry | `while True` meant a permanently failing clone hung every caller; now opt-in bounded via `max_retries` |
+| Partial clone left behind | A failed clone left an empty destination, so every later attempt failed with "destination path already exists" |
 
-`GitRepoCloner.clone_or_update_repo` retries forever by design. A failing clone
-therefore hangs its caller rather than returning; `git clone` of a local path
-returned 128 under this sandbox, which would have hung the suite indefinitely.
-The tests bound it explicitly — one fails on a second attempt, the other
-asserts on a worker thread within a timeout — but the unbounded loop is worth
-revisiting.
+Three of these were only reachable because the two platforms fail differently:
+Windows could not clone at all, while Linux cloned successfully into the wrong
+place. A single-platform run would have shipped the namespace bug.
 
 ## Repository token scope
 
 The fine-grained token in `.env` currently grants **read-only** access:
 `GET` on issues, pull requests, actions and contents all return 200, while
 `POST /issues` and `POST /git/refs` both return 403
-(`Resource not accessible by personal access token`). Publishing issues or pull
-requests by API requires adding **Issues: write** (and **Contents: write** for
-branches) to the token. Pushing over SSH is unaffected and works today.
+(`Resource not accessible by personal access token`).
+
+To publish issues or pull requests by API, add **Issues: write** (and
+**Contents: write** for branches) to the token. Pushing over SSH is unaffected
+and works today.
+
+`scripts/publish_findings_issue.py` is ready to file this document as an issue
+and close it; it fails with 403 until the token grants Issues write.
+
