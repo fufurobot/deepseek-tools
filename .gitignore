@@ -214,6 +214,22 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
+# Local scratch: sandbox-safe pytest temp roots, probe dirs and ACL reports
+.pytest-tmp*/
+.pytest-work/
+.pytest-run/
+.pytest-*/
+.pytest-of-*/
+pytest-*/
+.pyt-tmp*/
+.diag-*/
+.probe*/
+.acl-recovery/
+.uv-cache/
+.venv/
+.tmp-*/
+
+
 # PyPI configuration file
 .pypirc
 
