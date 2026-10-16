@@ -5,6 +5,8 @@ on:
     branches: ["**"]
   pull_request:
     branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -57,3 +59,40 @@ jobs:
             *.log
           if-no-files-found: ignore
           retention-days: 7
+
+  publish:
+    name: Build and attach release distributions
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Verify release tag matches project version
+        shell: bash
+        run: |
+          version="$(uv version --short)"
+          release_version="${GITHUB_REF_NAME#v}"
+          if [[ "$release_version" != "$version" ]]; then
+            echo "Release tag $GITHUB_REF_NAME does not match project version $version"
+            exit 1
+          fi
+
+      - name: Build wheel and source distribution
+        run: uv build
+
+      - name: Attach distributions to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
