@@ -1,5 +1,7 @@
 # deepseek-tools
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/fufurobot/deepseek-tools)
+
 [![CI](https://github.com/fufurobot/deepseek-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/fufurobot/deepseek-tools/actions/workflows/ci.yml)
 
 My collection of deepseek-tools, built as a Python wheel.
