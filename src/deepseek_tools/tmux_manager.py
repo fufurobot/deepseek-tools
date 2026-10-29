@@ -2,10 +2,12 @@
 """
 table_to_tmux.py – Convert HTML / reStructuredText tables to a tmux Bash script.
 
+Works with pandoc < 2.10 (old Table AST) and pandoc >= 2.10 (new Table AST).
+
 Usage:
-    python table_to_tmux.py input.html            # writes to stdout
+    python table_to_tmux.py input.html
     python table_to_tmux.py input.rst -o setup.sh
-    cat table.html | python table_to_tmux.py -
+    cat table.html | python table_to_tmux.py - --from html
 """
 
 import argparse
@@ -19,15 +21,12 @@ from pathlib import Path
 # 1. Pandoc JSON helpers
 # ----------------------------------------------------------------------
 def pandoc_json(text: str, from_format: str) -> dict:
-    """
-    Call pandoc to convert *text* (in *from_format*) to its JSON AST.
-    """
     cmd = [
         "pandoc",
         "--from", from_format,
         "--to", "json",
-        "--output", "-",          # write to stdout
-        "-",                      # read from stdin
+        "--output", "-",
+        "-",
     ]
     proc = subprocess.run(
         cmd,
@@ -40,93 +39,146 @@ def pandoc_json(text: str, from_format: str) -> dict:
 
 
 def collect_inlines(inlines: list) -> str:
-    """
-    Recursively extract plain text from a list of Pandoc Inline elements.
-    Handles Str, Space, SoftBreak, LineBreak, Emph, Strong, Link, etc.
-    """
+    """Extract plain text from a list of Pandoc Inline elements."""
     parts = []
     for inline in inlines:
+        if not isinstance(inline, dict):
+            continue
         t = inline.get("t")
         c = inline.get("c")
-        if t in ("Str", "Code"):
+        if t == "Str":
             parts.append(c)
+        elif t == "Code":
+            # Code Attr Text → c == [attr, "text"]
+            parts.append(c[1] if isinstance(c, list) and len(c) > 1 else "")
         elif t == "Space":
             parts.append(" ")
         elif t in ("SoftBreak", "LineBreak"):
             parts.append("\n")
-        elif t in ("Emph", "Strong", "Strikeout", "Superscript", "Subscript"):
+        elif t in ("Emph", "Strong", "Strikeout", "Superscript",
+                   "Subscript", "SmallCaps"):
+            # c == [inlines]
             parts.append(collect_inlines(c))
         elif t == "Link":
-            # c = [attr, inlines, target]
+            # c == [attr, inlines, [url, title]]
             parts.append(collect_inlines(c[1]))
         elif t == "Image":
-            # ignore images
             pass
         elif t == "Quoted":
-            # c = [quote_type, inlines]
+            # c == [quote_type, inlines]
             parts.append(collect_inlines(c[1]))
         elif t == "Cite":
-            # c = [citations, inlines]
+            # c == [citations, inlines]
             parts.append(collect_inlines(c[1]))
-        # other inline types can be added here if needed
+        elif t == "Span":
+            # c == [attr, inlines]
+            parts.append(collect_inlines(c[1]))
     return "".join(parts)
 
 
-def cell_text(cell: dict) -> str:
-    """
-    Extract the plain‑text content of a table cell.
-    A cell is a list of Blocks (usually Plain or Para).
-    """
-    blocks = cell.get("c", [])
+def cell_text_from_blocks(blocks: list) -> str:
     texts = []
     for block in blocks:
+        if not isinstance(block, dict):
+            continue
         bt = block.get("t")
         bc = block.get("c")
         if bt in ("Plain", "Para"):
             texts.append(collect_inlines(bc))
-        # other block types (e.g. BulletList) are ignored for simplicity
     return "\n".join(texts).strip()
 
 
-# ----------------------------------------------------------------------
-# 2. Table extraction
-# ----------------------------------------------------------------------
+def extract_cell_text(cell):
+    """
+    Works for:
+      * pandoc >= 2.10:  Cell        = {"t": "Cell", "c": [attr, align, rowspan, colspan, [Block]]}
+      * pandoc <  2.10:  TableCell   = [attr, align, rowspan, colspan, [Block]]
+    """
+    if isinstance(cell, dict) and cell.get("t") == "Cell":
+        cell_c = cell.get("c", [])
+        blocks = cell_c[4] if len(cell_c) > 4 else []
+        return cell_text_from_blocks(blocks)
+    elif isinstance(cell, list):
+        # Old-format TableCell is a plain list with 5 elements
+        blocks = cell[4] if len(cell) > 4 else []
+        return cell_text_from_blocks(blocks)
+    return ""
+
+
+def extract_row_cells(row_node):
+    """
+    Works for:
+      * pandoc >= 2.10:  Row     = {"t": "Row", "c": [attr, [Cell]]}
+      * pandoc <  2.10:  a row   = [TableCell]
+    """
+    if isinstance(row_node, dict) and row_node.get("t") == "Row":
+        row_c = row_node.get("c", [None, []])
+        cells = row_c[1] if len(row_c) > 1 else []
+        return [extract_cell_text(cell) for cell in cells]
+    elif isinstance(row_node, list):
+        return [extract_cell_text(cell) for cell in row_node]
+    return []
+
+
+def extract_table_rows(table_c: list) -> list[list[str]]:
+    """Extract rows from the `c` field of a pandoc Table node."""
+    # ---- New format (pandoc >= 2.10) ----------------------------------
+    is_new = (
+        len(table_c) >= 6
+        and isinstance(table_c[3], dict)
+        and table_c[3].get("t") == "TableHead"
+    )
+    if is_new:
+        rows = []
+        # Head
+        head_c = table_c[3].get("c", [None, []])
+        head_rows = head_c[1] if len(head_c) > 1 else []
+        for r in head_rows:
+            rows.append(extract_row_cells(r))
+        # Bodies
+        for body in table_c[4]:
+            if not isinstance(body, dict):
+                continue
+            body_c = body.get("c", [])
+            # TableBody c == [attr, row_head_columns, [Row], [Row]]
+            intermediate = body_c[2] if len(body_c) > 2 else []
+            body_rows    = body_c[3] if len(body_c) > 3 else []
+            for r in intermediate:
+                rows.append(extract_row_cells(r))
+            for r in body_rows:
+                rows.append(extract_row_cells(r))
+        # Foot (optional)
+        if len(table_c) > 5 and isinstance(table_c[5], dict):
+            foot_c = table_c[5].get("c", [None, []])
+            foot_rows = foot_c[1] if len(foot_c) > 1 else []
+            for r in foot_rows:
+                rows.append(extract_row_cells(r))
+        return rows
+
+    # ---- Old format (pandoc < 2.10) -----------------------------------
+    if len(table_c) >= 5:
+        rows = []
+        headers   = table_c[3]     # [TableCell]
+        body_rows = table_c[4]     # [[TableCell]]
+        if headers:
+            rows.append([extract_cell_text(c) for c in headers])
+        for r in body_rows:
+            rows.append([extract_cell_text(c) for c in r])
+        return rows
+
+    return []
+
+
 def extract_tables(ast: dict) -> list[list[list[str]]]:
-    """
-    Walk the Pandoc AST and return a list of tables.
-    Each table is a 2‑D list of cell strings (rows × columns).
-    """
     tables = []
 
     def walk(node):
         if isinstance(node, dict):
             if node.get("t") == "Table":
-                # Pandoc's Table constructor (since pandoc 2.10):
-                # Table Attr Caption [ColSpec] TableHead [TableBody] TableFoot
-                # The actual rows are in the TableBody(s) and TableHead.
-                # For simplicity we collect all rows from head and bodies.
-                table_data = node["c"]
-                # index 3: TableHead, index 4: list of TableBody
-                head = table_data[3]
-                bodies = table_data[4]
-
-                rows = []
-                # ---- header row(s) ----
-                head_rows = head.get("c", [])  # list of rows
-                for row in head_rows:
-                    # row is a list of cells
-                    rows.append([cell_text(cell) for cell in row])
-                # ---- body rows ----
-                for body in bodies:
-                    body_rows = body.get("c", [])  # list of rows
-                    for row in body_rows:
-                        rows.append([cell_text(cell) for cell in row])
-
-                tables.append(rows)
-                # do not recurse into the table’s children – we already processed it
-                return
-
-            # recurse into other dicts
+                rows = extract_table_rows(node.get("c", []))
+                if rows:
+                    tables.append(rows)
+                return                      # do not recurse into Table children
             for v in node.values():
                 walk(v)
         elif isinstance(node, list):
@@ -138,77 +190,63 @@ def extract_tables(ast: dict) -> list[list[list[str]]]:
 
 
 # ----------------------------------------------------------------------
-# 3. tmux script generation
+# 2. tmux script generation
 # ----------------------------------------------------------------------
 def generate_tmux_script(
     tables: list[list[list[str]]],
     session_name: str = "table_session",
     attach: bool = True,
 ) -> str:
-    """
-    Build a Bash script that creates a tmux session with one window per table.
-    Each cell becomes a pane that runs the cell’s command.
-    """
-    lines = []
-    lines.append("#!/usr/bin/env bash")
-    lines.append("set -euo pipefail")
-    lines.append("")
-
-    # Create the session in detached mode.
+    lines = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
     lines.append(f"tmux new-session -d -s {shlex.quote(session_name)}")
     lines.append("")
 
     for win_idx, table in enumerate(tables, start=1):
         win_name = f"table_{win_idx}"
-        # First window already exists (window 0), so we create a new window for
-        # every table except the first.
+
         if win_idx == 1:
-            # Rename the initial window
-            lines.append(f"tmux rename-window -t {shlex.quote(session_name)}:0 {shlex.quote(win_name)}")
+            lines.append(
+                f"tmux rename-window -t {shlex.quote(session_name)}:0 "
+                f"{shlex.quote(win_name)}"
+            )
         else:
             lines.append(
-                f"tmux new-window -t {shlex.quote(session_name)} -n {shlex.quote(win_name)}"
+                f"tmux new-window -t {shlex.quote(session_name)} "
+                f"-n {shlex.quote(win_name)}"
             )
 
-        # Flatten the table into a list of commands (row‑major order).
-        cmds = []
-        for row in table:
-            for cell in row:
-                cmd = cell.strip()
-                if cmd:                         # ignore empty cells
-                    cmds.append(cmd)
-
+        cmds = [cell.strip() for row in table for cell in row if cell.strip()]
         if not cmds:
-            lines.append(f"# (empty table – no commands)")
+            lines.append("# (empty table – no commands)")
             continue
 
-        # The first command goes into the current pane.
-        lines.append(f"tmux send-keys -t {shlex.quote(session_name)}:{win_name}.0 {shlex.quote(cmds[0])} C-m")
+        # First command goes into the initial pane (index 0).
+        lines.append(
+            f"tmux send-keys -t "
+            f"{shlex.quote(session_name)}:{win_name}.0 "
+            f"{shlex.quote(cmds[0])} C-m"
+        )
 
-        # Create additional panes for the remaining commands.
-        # We alternate horizontal and vertical splits, then tile them.
+        # Remaining commands: split + send.  Use -P -F '#{pane_id}' to get
+        # the new pane's id reliably (the new pane is active anyway, but
+        # being explicit avoids any target ambiguity).
         for i, cmd in enumerate(cmds[1:], start=1):
-            if i % 2 == 1:
-                split_flag = "-h"   # horizontal split
-            else:
-                split_flag = "-v"   # vertical split
+            split_flag = "-h" if i % 2 == 1 else "-v"
             lines.append(
-                f"tmux split-window {split_flag} -t {shlex.quote(session_name)}:{win_name} "
-                f"-c '#{{pane_current_path}}'"
+                f'PANE=$(tmux split-window {split_flag} '
+                f'-t {shlex.quote(session_name)}:{win_name} '
+                f'-P -F "#{{pane_id}}")'
             )
-            # Send the command to the newly created pane.
-            # (The pane index of the new pane is not fixed, so we use the
-            #  'last' target which refers to the most recently created pane.)
             lines.append(
-                f"tmux send-keys -t {shlex.quote(session_name)}:{win_name}.+ "
-                f"{shlex.quote(cmd)} C-m"
+                f'tmux send-keys -t "$PANE" {shlex.quote(cmd)} C-m'
             )
 
-        # Arrange all panes in a grid.
-        lines.append(f"tmux select-layout -t {shlex.quote(session_name)}:{win_name} tiled")
+        lines.append(
+            f"tmux select-layout -t "
+            f"{shlex.quote(session_name)}:{win_name} tiled"
+        )
         lines.append("")
 
-    # Attach to the session unless the user asked for a detached script.
     if attach:
         lines.append(f"tmux attach-session -t {shlex.quote(session_name)}")
 
@@ -216,7 +254,7 @@ def generate_tmux_script(
 
 
 # ----------------------------------------------------------------------
-# 4. Command‑line interface
+# 3. CLI
 # ----------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
@@ -224,33 +262,23 @@ def main():
     )
     parser.add_argument(
         "input",
-        help="Input file (use '-' for stdin). The format is inferred from the extension; "
-             "for stdin you must specify --from.",
+        help="Input file (use '-' for stdin). The format is inferred from the "
+             "extension; for stdin you must specify --from.",
     )
     parser.add_argument(
-        "--from",
-        dest="from_format",
-        default=None,
+        "--from", dest="from_format", default=None,
         help="Pandoc input format (e.g. html, rst). Required when reading from stdin.",
     )
-    parser.add_argument(
-        "-o", "--output",
-        default="-",
-        help="Output file (default: stdout).",
-    )
-    parser.add_argument(
-        "--session",
-        default="table_session",
-        help="tmux session name (default: table_session).",
-    )
-    parser.add_argument(
-        "--no-attach",
-        action="store_true",
-        help="Do not append 'tmux attach-session' to the generated script.",
-    )
+    parser.add_argument("-o", "--output", default="-",
+                        help="Output file (default: stdout).")
+    parser.add_argument("--session", default="table_session",
+                        help="tmux session name (default: table_session).")
+    parser.add_argument("--no-attach", action="store_true",
+                        help="Do not append 'tmux attach-session' to the generated script.")
+    parser.add_argument("--debug", action="store_true",
+                        help="Dump the pandoc JSON AST to stderr (for debugging).")
     args = parser.parse_args()
 
-    # Read the input.
     if args.input == "-":
         if not args.from_format:
             parser.error("--from is required when reading from stdin.")
@@ -273,28 +301,28 @@ def main():
                     "Use --from to specify the Pandoc input format."
                 )
 
-    # Convert to Pandoc JSON.
     ast = pandoc_json(text, from_format)
 
-    # Extract tables.
+    if args.debug:
+        json.dump(ast, sys.stderr, indent=2)
+        sys.stderr.write("\n")
+
     tables = extract_tables(ast)
     if not tables:
         sys.exit("No tables found in the input.")
 
-    # Build the tmux script.
     script = generate_tmux_script(
         tables,
         session_name=args.session,
         attach=not args.no_attach,
     )
 
-    # Write the result.
     if args.output == "-":
         sys.stdout.write(script)
     else:
-        Path(args.output).write_text(script, encoding="utf-8")
-        # Make the generated script executable.
-        Path(args.output).chmod(0o755)
+        out = Path(args.output)
+        out.write_text(script, encoding="utf-8")
+        out.chmod(0o755)
 
 
 if __name__ == "__main__":
