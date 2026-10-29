@@ -5,6 +5,10 @@ table_to_tmux.py – Convert HTML / reStructuredText tables to a tmux Bash scrip
 Works with pandoc < 2.10 (old Table AST), pandoc 2.10–2.19 (tagged TableHead/
 TableBody/Row/Cell), and pandoc 3.x (pandoc-types >= 1.23, flat records).
 
+The layout of each tmux window mirrors the *visual* grid of the table:
+rowspan/colspan are preserved, and panes are created by recursively
+bisecting the window along split lines that don't cross any cell.
+
 Usage:
     python table_to_tmux.py input.html
     python table_to_tmux.py input.rst -o setup.sh
@@ -53,7 +57,6 @@ def collect_inlines(inlines: list) -> str:
         if t == "Str":
             parts.append(c)
         elif t == "Code":
-            # Code Attr Text → c == [attr, "text"]
             parts.append(c[1] if isinstance(c, list) and len(c) > 1 else "")
         elif t == "Space":
             parts.append(" ")
@@ -63,21 +66,16 @@ def collect_inlines(inlines: list) -> str:
                    "Subscript", "SmallCaps"):
             parts.append(collect_inlines(c))
         elif t == "Link":
-            # c == [attr, inlines, [url, title]]
             parts.append(collect_inlines(c[1]))
         elif t == "Image":
             pass
         elif t == "Quoted":
-            # c == [quote_type, inlines]
             parts.append(collect_inlines(c[1]))
         elif t == "Cite":
-            # c == [citations, inlines]
             parts.append(collect_inlines(c[1]))
         elif t == "Span":
-            # c == [attr, inlines]
             parts.append(collect_inlines(c[1]))
         elif t == "Math":
-            # c == [math_type, text]
             parts.append(c[1] if isinstance(c, list) and len(c) > 1 else "")
     return "".join(parts)
 
@@ -97,92 +95,80 @@ def cell_text_from_blocks(blocks: list) -> str:
 
 
 # ----------------------------------------------------------------------
-# 1b. Pandoc table parsing (pandoc <2.10, 2.10–2.19, and 3.x)
+# 1b. Pandoc table parsing, preserving rowspan / colspan
 # ----------------------------------------------------------------------
 def unwrap_ctor(node, tag):
     """
     Return the payload `c` of a tagged {t: tag, c: ...} node.
-    Otherwise return the node unchanged (handles pandoc-types >= 1.23 flat
-    records where TableHead/TableBody/Row/Cell are plain lists).
+    Otherwise return the node unchanged (pandoc-types >= 1.23 flat records).
     """
     if isinstance(node, dict) and node.get("t") == tag:
         return node.get("c", [])
     return node
 
 
-def extract_cell_text(cell):
-    """Cell = [attr, align, rowspan, colspan, [Block]] (same shape old & new)."""
+def extract_cell_info(cell):
+    """Return (rowspan, colspan, text) for a pandoc Cell."""
     cell = unwrap_ctor(cell, "Cell")
     if not isinstance(cell, list) or len(cell) < 5:
-        return ""
-    blocks = cell[4]
-    return cell_text_from_blocks(blocks)
+        return (1, 1, "")
+    rowspan = cell[2] if len(cell) > 2 and isinstance(cell[2], int) else 1
+    colspan = cell[3] if len(cell) > 3 and isinstance(cell[3], int) else 1
+    text = cell_text_from_blocks(cell[4])
+    return (rowspan, colspan, text)
 
 
-def extract_row_cells(row):
-    """Row = [attr, [Cell]] or {"t":"Row","c":[attr,[Cell]]}."""
+def extract_row_with_spans(row):
     row = unwrap_ctor(row, "Row")
     if not isinstance(row, list) or len(row) < 2:
         return []
     cells = row[1]
     if not isinstance(cells, list):
         return []
-    return [extract_cell_text(c) for c in cells]
+    return [extract_cell_info(c) for c in cells]
 
 
-def extract_table_head_rows(head):
-    """TableHead / TableFoot = [attr, [Row]]."""
+def extract_head_rows_raw(head):
+    """Return the raw row list from a TableHead / TableFoot."""
     head = unwrap_ctor(head, "TableHead")
     if not isinstance(head, list) or len(head) < 2:
         return []
     rows = head[1]
-    if not isinstance(rows, list):
-        return []
-    return [extract_row_cells(r) for r in rows]
+    return rows if isinstance(rows, list) else []
 
 
-def extract_table_body_rows(body):
-    """TableBody = [attr, rowheadcols, [Row], [Row]]."""
-    body = unwrap_ctor(body, "TableBody")
-    if not isinstance(body, list) or len(body) < 4:
-        return []
-    intermediate = body[2] if isinstance(body[2], list) else []
-    rows         = body[3] if isinstance(body[3], list) else []
-    out = []
-    for r in intermediate:
-        out.append(extract_row_cells(r))
-    for r in rows:
-        out.append(extract_row_cells(r))
-    return out
-
-
-def extract_table_rows(table_c):
+def extract_table_rows_with_spans(table_c):
     if not isinstance(table_c, list):
         return []
 
     # ---- New format (pandoc >= 2.10): 6 fields -------------------------
-    #   Table Attr Caption [ColSpec] TableHead [TableBody] TableFoot
     if len(table_c) >= 6:
         rows = []
-        rows.extend(extract_table_head_rows(table_c[3]))   # head
+        for r in extract_head_rows_raw(table_c[3]):
+            rows.append(extract_row_with_spans(r))
         bodies = table_c[4]
         if isinstance(bodies, list):
             for body in bodies:
-                rows.extend(extract_table_body_rows(body))
-        rows.extend(extract_table_head_rows(table_c[5]))   # foot
+                body = unwrap_ctor(body, "TableBody")
+                if not isinstance(body, list) or len(body) < 4:
+                    continue
+                for r in body[2]:
+                    rows.append(extract_row_with_spans(r))
+                for r in body[3]:
+                    rows.append(extract_row_with_spans(r))
+        if len(table_c) > 5:
+            for r in extract_head_rows_raw(table_c[5]):
+                rows.append(extract_row_with_spans(r))
         return rows
 
     # ---- Old format (pandoc < 2.10): 5 fields --------------------------
-    #   Table [Inline] [Alignment] [Double] [TableCell] [[TableCell]]
     if len(table_c) >= 5:
         rows = []
-        headers   = table_c[3]
-        body_rows = table_c[4]
+        headers = table_c[3]
         if headers:
-            rows.append([extract_cell_text(c) for c in headers])
-        if isinstance(body_rows, list):
-            for r in body_rows:
-                rows.append([extract_cell_text(c) for c in r])
+            rows.append([extract_cell_info(c) for c in headers])
+        for r in table_c[4]:
+            rows.append([extract_cell_info(c) for c in r])
         return rows
 
     return []
@@ -194,10 +180,10 @@ def extract_tables(ast: dict) -> list:
     def walk(node):
         if isinstance(node, dict):
             if node.get("t") == "Table":
-                rows = extract_table_rows(node.get("c", []))
+                rows = extract_table_rows_with_spans(node.get("c", []))
                 if rows:
                     tables.append(rows)
-                return                      # do not recurse into Table children
+                return
             for v in node.values():
                 walk(v)
         elif isinstance(node, list):
@@ -209,19 +195,140 @@ def extract_tables(ast: dict) -> list:
 
 
 # ----------------------------------------------------------------------
-# 2. tmux script generation
+# 2. Layout generation
 # ----------------------------------------------------------------------
-def generate_tmux_script(
-    tables: list,
-    session_name: str = "table_session",
-    attach: bool = True,
-) -> str:
+def build_table_layout(table_with_spans):
+    """
+    table_with_spans: list of rows of (rowspan, colspan, text) tuples.
+
+    Returns:
+      cells_info : dict  cell_id -> (top_row, left_col, height, width, text)
+      pane_map   : dict  cell_id -> shell variable name (e.g. "P2")
+      split_cmds : list of bash commands that create the layout
+                   (assumes P0 is the initial pane's ID)
+    """
+    grid = {}
+    cells_info = {}
+    cell_id = 0
+
+    for r, row in enumerate(table_with_spans):
+        c = 0
+        for (rowspan, colspan, text) in row:
+            while (r, c) in grid:
+                c += 1
+            cid = cell_id
+            cell_id += 1
+            cells_info[cid] = (r, c, rowspan, colspan, text)
+            for dr in range(rowspan):
+                for dc in range(colspan):
+                    grid[(r + dr, c + dc)] = cid
+            c += colspan
+
+    if not cells_info:
+        return {}, {}, []
+
+    max_row = max(info[0] + info[2] for info in cells_info.values())
+    max_col = max(info[1] + info[3] for info in cells_info.values())
+
+    var_counter = [0]
+    pane_map = {}
+    split_cmds = _split_layout(
+        "P0",
+        (0, 0, max_row, max_col),
+        list(cells_info.keys()),
+        cells_info,
+        var_counter,
+        pane_map,
+    )
+    return cells_info, pane_map, split_cmds
+
+
+def _split_layout(pane_var, rect, cell_ids, cells_info, var_counter, pane_map):
+    """
+    Recursively split `pane_var` (which covers `rect`) into one pane per cell.
+    """
+    if not cell_ids:
+        return []
+    if len(cell_ids) == 1:
+        pane_map[cell_ids[0]] = pane_var
+        return []
+
+    # ---- Horizontal split (top/bottom) ---------------------------------
+    for split_row in range(rect[0] + 1, rect[0] + rect[2]):
+        crosses = any(
+            cells_info[c][0] < split_row < cells_info[c][0] + cells_info[c][2]
+            for c in cell_ids
+        )
+        if crosses:
+            continue
+        top_cells = [c for c in cell_ids if cells_info[c][0] < split_row]
+        bot_cells = [c for c in cell_ids if cells_info[c][0] >= split_row]
+        if not top_cells or not bot_cells:
+            continue
+
+        var_counter[0] += 1
+        new_var = f"P{var_counter[0]}"
+        top_h = split_row - rect[0]
+        bot_h = rect[0] + rect[2] - split_row
+        bot_pct = max(1, min(99, bot_h * 100 // (top_h + bot_h)))
+
+        cmds = [
+            f'{new_var}=$(tmux split-window -v -p {bot_pct} '
+            f'-t "${{{pane_var}}}" -P -F "#{{pane_id}}")'
+        ]
+        top_rect = (rect[0], rect[1], top_h, rect[3])
+        bot_rect = (split_row, rect[1], bot_h, rect[3])
+        cmds += _split_layout(pane_var, top_rect, top_cells,
+                              cells_info, var_counter, pane_map)
+        cmds += _split_layout(new_var, bot_rect, bot_cells,
+                              cells_info, var_counter, pane_map)
+        return cmds
+
+    # ---- Vertical split (left/right) -----------------------------------
+    for split_col in range(rect[1] + 1, rect[1] + rect[3]):
+        crosses = any(
+            cells_info[c][1] < split_col < cells_info[c][1] + cells_info[c][3]
+            for c in cell_ids
+        )
+        if crosses:
+            continue
+        left_cells = [c for c in cell_ids if cells_info[c][1] < split_col]
+        right_cells = [c for c in cell_ids if cells_info[c][1] >= split_col]
+        if not left_cells or not right_cells:
+            continue
+
+        var_counter[0] += 1
+        new_var = f"P{var_counter[0]}"
+        left_w = split_col - rect[1]
+        right_w = rect[1] + rect[3] - split_col
+        right_pct = max(1, min(99, right_w * 100 // (left_w + right_w)))
+
+        cmds = [
+            f'{new_var}=$(tmux split-window -h -p {right_pct} '
+            f'-t "${{{pane_var}}}" -P -F "#{{pane_id}}")'
+        ]
+        left_rect = (rect[0], rect[1], rect[2], left_w)
+        right_rect = (rect[0], split_col, rect[2], right_w)
+        cmds += _split_layout(pane_var, left_rect, left_cells,
+                              cells_info, var_counter, pane_map)
+        cmds += _split_layout(new_var, right_rect, right_cells,
+                              cells_info, var_counter, pane_map)
+        return cmds
+
+    # Fallback: this shouldn't happen for rectangular tables, but be safe.
+    for cid in cell_ids:
+        pane_map[cid] = pane_var
+    return []
+
+
+def generate_tmux_script(tables, session_name="table_session", attach=True):
     lines = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
     lines.append(f"tmux new-session -d -s {shlex.quote(session_name)}")
     lines.append("")
 
     for win_idx, table in enumerate(tables, start=1):
         win_name = f"table_{win_idx}"
+        target = f"{session_name}:{win_name}"
 
         if win_idx == 1:
             lines.append(
@@ -234,35 +341,33 @@ def generate_tmux_script(
                 f"-n {shlex.quote(win_name)}"
             )
 
-        cmds = [cell.strip() for row in table for cell in row if cell.strip()]
-        if not cmds:
-            lines.append("# (empty table – no commands)")
+        cells_info, pane_map, split_cmds = build_table_layout(table)
+        if not cells_info:
+            lines.append("# (empty table)")
+            lines.append("")
             continue
 
-        # First command goes into the initial pane (index 0).
         lines.append(
-            f"tmux send-keys -t "
-            f"{shlex.quote(session_name)}:{win_name}.0 "
-            f"{shlex.quote(cmds[0])} C-m"
+            f'P0=$(tmux list-panes -t {shlex.quote(target)} '
+            f'-F "#{{pane_id}}" | head -n 1)'
         )
+        lines.extend(split_cmds)
 
-        # Remaining commands: split + send.  Use -P -F '#{pane_id}' to get
-        # the new pane's id reliably.
-        for i, cmd in enumerate(cmds[1:], start=1):
-            split_flag = "-h" if i % 2 == 1 else "-v"
+        # Send each cell's command to its pane.
+        for cid in sorted(cells_info.keys()):
+            top, left, h, w, text = cells_info[cid]
+            text = text.strip()
+            if not text:
+                continue
+            var = pane_map.get(cid)
+            if not var:
+                continue
+            lines.append(f"# ({top},{left}) {h}x{w}")
             lines.append(
-                f'PANE=$(tmux split-window {split_flag} '
-                f'-t {shlex.quote(session_name)}:{win_name} '
-                f'-P -F "#{{pane_id}}")'
-            )
-            lines.append(
-                f'tmux send-keys -t "$PANE" {shlex.quote(cmd)} C-m'
+                f'tmux send-keys -t "${{{var}}}" '
+                f'{shlex.quote(text)} C-m'
             )
 
-        lines.append(
-            f"tmux select-layout -t "
-            f"{shlex.quote(session_name)}:{win_name} tiled"
-        )
         lines.append("")
 
     if attach:
