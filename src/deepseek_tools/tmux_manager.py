@@ -2,7 +2,8 @@
 """
 table_to_tmux.py – Convert HTML / reStructuredText tables to a tmux Bash script.
 
-Works with pandoc < 2.10 (old Table AST) and pandoc >= 2.10 (new Table AST).
+Works with pandoc < 2.10 (old Table AST), pandoc 2.10–2.19 (tagged TableHead/
+TableBody/Row/Cell), and pandoc 3.x (pandoc-types >= 1.23, flat records).
 
 Usage:
     python table_to_tmux.py input.html
@@ -16,6 +17,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+
 
 # ----------------------------------------------------------------------
 # 1. Pandoc JSON helpers
@@ -40,6 +42,8 @@ def pandoc_json(text: str, from_format: str) -> dict:
 
 def collect_inlines(inlines: list) -> str:
     """Extract plain text from a list of Pandoc Inline elements."""
+    if not isinstance(inlines, list):
+        return ""
     parts = []
     for inline in inlines:
         if not isinstance(inline, dict):
@@ -57,7 +61,6 @@ def collect_inlines(inlines: list) -> str:
             parts.append("\n")
         elif t in ("Emph", "Strong", "Strikeout", "Superscript",
                    "Subscript", "SmallCaps"):
-            # c == [inlines]
             parts.append(collect_inlines(c))
         elif t == "Link":
             # c == [attr, inlines, [url, title]]
@@ -73,10 +76,15 @@ def collect_inlines(inlines: list) -> str:
         elif t == "Span":
             # c == [attr, inlines]
             parts.append(collect_inlines(c[1]))
+        elif t == "Math":
+            # c == [math_type, text]
+            parts.append(c[1] if isinstance(c, list) and len(c) > 1 else "")
     return "".join(parts)
 
 
 def cell_text_from_blocks(blocks: list) -> str:
+    if not isinstance(blocks, list):
+        return ""
     texts = []
     for block in blocks:
         if not isinstance(block, dict):
@@ -88,88 +96,99 @@ def cell_text_from_blocks(blocks: list) -> str:
     return "\n".join(texts).strip()
 
 
+# ----------------------------------------------------------------------
+# 1b. Pandoc table parsing (pandoc <2.10, 2.10–2.19, and 3.x)
+# ----------------------------------------------------------------------
+def unwrap_ctor(node, tag):
+    """
+    Return the payload `c` of a tagged {t: tag, c: ...} node.
+    Otherwise return the node unchanged (handles pandoc-types >= 1.23 flat
+    records where TableHead/TableBody/Row/Cell are plain lists).
+    """
+    if isinstance(node, dict) and node.get("t") == tag:
+        return node.get("c", [])
+    return node
+
+
 def extract_cell_text(cell):
-    """
-    Works for:
-      * pandoc >= 2.10:  Cell        = {"t": "Cell", "c": [attr, align, rowspan, colspan, [Block]]}
-      * pandoc <  2.10:  TableCell   = [attr, align, rowspan, colspan, [Block]]
-    """
-    if isinstance(cell, dict) and cell.get("t") == "Cell":
-        cell_c = cell.get("c", [])
-        blocks = cell_c[4] if len(cell_c) > 4 else []
-        return cell_text_from_blocks(blocks)
-    elif isinstance(cell, list):
-        # Old-format TableCell is a plain list with 5 elements
-        blocks = cell[4] if len(cell) > 4 else []
-        return cell_text_from_blocks(blocks)
-    return ""
+    """Cell = [attr, align, rowspan, colspan, [Block]] (same shape old & new)."""
+    cell = unwrap_ctor(cell, "Cell")
+    if not isinstance(cell, list) or len(cell) < 5:
+        return ""
+    blocks = cell[4]
+    return cell_text_from_blocks(blocks)
 
 
-def extract_row_cells(row_node):
-    """
-    Works for:
-      * pandoc >= 2.10:  Row     = {"t": "Row", "c": [attr, [Cell]]}
-      * pandoc <  2.10:  a row   = [TableCell]
-    """
-    if isinstance(row_node, dict) and row_node.get("t") == "Row":
-        row_c = row_node.get("c", [None, []])
-        cells = row_c[1] if len(row_c) > 1 else []
-        return [extract_cell_text(cell) for cell in cells]
-    elif isinstance(row_node, list):
-        return [extract_cell_text(cell) for cell in row_node]
-    return []
+def extract_row_cells(row):
+    """Row = [attr, [Cell]] or {"t":"Row","c":[attr,[Cell]]}."""
+    row = unwrap_ctor(row, "Row")
+    if not isinstance(row, list) or len(row) < 2:
+        return []
+    cells = row[1]
+    if not isinstance(cells, list):
+        return []
+    return [extract_cell_text(c) for c in cells]
 
 
-def extract_table_rows(table_c: list) -> list[list[str]]:
-    """Extract rows from the `c` field of a pandoc Table node."""
-    # ---- New format (pandoc >= 2.10) ----------------------------------
-    is_new = (
-        len(table_c) >= 6
-        and isinstance(table_c[3], dict)
-        and table_c[3].get("t") == "TableHead"
-    )
-    if is_new:
+def extract_table_head_rows(head):
+    """TableHead / TableFoot = [attr, [Row]]."""
+    head = unwrap_ctor(head, "TableHead")
+    if not isinstance(head, list) or len(head) < 2:
+        return []
+    rows = head[1]
+    if not isinstance(rows, list):
+        return []
+    return [extract_row_cells(r) for r in rows]
+
+
+def extract_table_body_rows(body):
+    """TableBody = [attr, rowheadcols, [Row], [Row]]."""
+    body = unwrap_ctor(body, "TableBody")
+    if not isinstance(body, list) or len(body) < 4:
+        return []
+    intermediate = body[2] if isinstance(body[2], list) else []
+    rows         = body[3] if isinstance(body[3], list) else []
+    out = []
+    for r in intermediate:
+        out.append(extract_row_cells(r))
+    for r in rows:
+        out.append(extract_row_cells(r))
+    return out
+
+
+def extract_table_rows(table_c):
+    if not isinstance(table_c, list):
+        return []
+
+    # ---- New format (pandoc >= 2.10): 6 fields -------------------------
+    #   Table Attr Caption [ColSpec] TableHead [TableBody] TableFoot
+    if len(table_c) >= 6:
         rows = []
-        # Head
-        head_c = table_c[3].get("c", [None, []])
-        head_rows = head_c[1] if len(head_c) > 1 else []
-        for r in head_rows:
-            rows.append(extract_row_cells(r))
-        # Bodies
-        for body in table_c[4]:
-            if not isinstance(body, dict):
-                continue
-            body_c = body.get("c", [])
-            # TableBody c == [attr, row_head_columns, [Row], [Row]]
-            intermediate = body_c[2] if len(body_c) > 2 else []
-            body_rows    = body_c[3] if len(body_c) > 3 else []
-            for r in intermediate:
-                rows.append(extract_row_cells(r))
-            for r in body_rows:
-                rows.append(extract_row_cells(r))
-        # Foot (optional)
-        if len(table_c) > 5 and isinstance(table_c[5], dict):
-            foot_c = table_c[5].get("c", [None, []])
-            foot_rows = foot_c[1] if len(foot_c) > 1 else []
-            for r in foot_rows:
-                rows.append(extract_row_cells(r))
+        rows.extend(extract_table_head_rows(table_c[3]))   # head
+        bodies = table_c[4]
+        if isinstance(bodies, list):
+            for body in bodies:
+                rows.extend(extract_table_body_rows(body))
+        rows.extend(extract_table_head_rows(table_c[5]))   # foot
         return rows
 
-    # ---- Old format (pandoc < 2.10) -----------------------------------
+    # ---- Old format (pandoc < 2.10): 5 fields --------------------------
+    #   Table [Inline] [Alignment] [Double] [TableCell] [[TableCell]]
     if len(table_c) >= 5:
         rows = []
-        headers   = table_c[3]     # [TableCell]
-        body_rows = table_c[4]     # [[TableCell]]
+        headers   = table_c[3]
+        body_rows = table_c[4]
         if headers:
             rows.append([extract_cell_text(c) for c in headers])
-        for r in body_rows:
-            rows.append([extract_cell_text(c) for c in r])
+        if isinstance(body_rows, list):
+            for r in body_rows:
+                rows.append([extract_cell_text(c) for c in r])
         return rows
 
     return []
 
 
-def extract_tables(ast: dict) -> list[list[list[str]]]:
+def extract_tables(ast: dict) -> list:
     tables = []
 
     def walk(node):
@@ -193,7 +212,7 @@ def extract_tables(ast: dict) -> list[list[list[str]]]:
 # 2. tmux script generation
 # ----------------------------------------------------------------------
 def generate_tmux_script(
-    tables: list[list[list[str]]],
+    tables: list,
     session_name: str = "table_session",
     attach: bool = True,
 ) -> str:
@@ -228,8 +247,7 @@ def generate_tmux_script(
         )
 
         # Remaining commands: split + send.  Use -P -F '#{pane_id}' to get
-        # the new pane's id reliably (the new pane is active anyway, but
-        # being explicit avoids any target ambiguity).
+        # the new pane's id reliably.
         for i, cmd in enumerate(cmds[1:], start=1):
             split_flag = "-h" if i % 2 == 1 else "-v"
             lines.append(
