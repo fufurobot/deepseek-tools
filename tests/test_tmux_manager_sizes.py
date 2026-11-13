@@ -83,26 +83,32 @@ class TestAbsoluteMode:
         with pytest.raises(tm.LayoutError, match="flexible track"):
             tm.resolve_sizes(_h(("px", 10.0), None), 100, "width")
 
-    def test_absolute_hints_can_shrink_the_declared_table(self):
-        # 10 + 10 cells describe a 20-cell table; the declared 100 cells is
-        # only an upper bound, so the sizes are used as given.
-        assert tm.resolve_sizes(_h(("px", 10.0), ("px", 10.0)), 100, "w") == [
-            10.0, 10.0
-        ]
+    def test_absolute_hints_must_fill_the_table(self):
+        # 10 + 10 cells cannot describe a table declared 100 cells wide:
+        # there is no flexible track to take the other 80 cells.
+        with pytest.raises(tm.LayoutError, match="provides 100"):
+            tm.resolve_sizes(_h(("px", 10.0), ("px", 10.0)), 100, "w")
 
 
 class TestMixedMode:
-    def test_percentage_caps_an_absolute_table(self):
-        # 10 + 10 absolute cells plus a 10% track and an unconstrained one:
-        # the table shrinks to 20 / (1 - 0.1) -> 23 cells (not 100), the
-        # percentage track takes 10% of that (2.3 -> 2) and the rest goes to
-        # the unconstrained track. Sizes still add up to the new total.
-        hint = _h(("px", 10.0), ("px", 10.0), ("%", 10))
-        assert tm.resolve_sizes(hint, 100, "w") == [10.0, 10.0, 2.0]
+    def test_percentage_next_to_absolute_sizes(self):
+        # Without a flexible track the sizes must fill the table exactly: a
+        # 10% track takes 10 of the 100 cells, so the absolute cells must
+        # make up the other 90.
+        hint = _h(("px", 40.0), ("px", 50.0), ("%", 10))
+        assert tm.resolve_sizes(hint, 100, "w") == [40.0, 50.0, 10.0]
 
-    def test_absolute_overrides_a_smaller_percentage(self):
-        # The percentage of the free track is not fixed when the table
-        # shrinks: it becomes 0% of the smaller table rather than growing
-        # the absolute cells.
-        hint = _h(("px", 10.0), ("%", 50))
-        assert tm.resolve_sizes(hint, 100, "w") == [10.0, 10.0]
+
+    def test_percentage_share_after_flexible_track(self):
+        # With a "-" track the percentage applies first, the flexible track
+        # takes what the absolute sizes leave.
+        hint = _h(("px", 30.0), ("%", 50), ("px", "-"))
+        assert tm.resolve_sizes(hint, 100, "w") == [30.0, 50.0, 20.0]
+
+    def test_absolute_and_percentage_over_commit(self):
+        hint = _h(("px", 40.0), ("px", 30.0), ("%", 50))
+        with pytest.raises(tm.LayoutError, match="provides 100"):
+            tm.resolve_sizes(hint, 100, "w")
+        hint = _h(("px", 60.0), ("px", 60.0), ("px", "-"))
+        with pytest.raises(tm.LayoutError, match="provides 100"):
+            tm.resolve_sizes(hint, 100, "w")
