@@ -168,3 +168,27 @@ class TestMainStdin:
         _run(monkeypatch, ["-", "--from", "dsl", "-o", "-"],
              stdin=DSL.replace("begin table", "begin table "))  # not auto-detected
         assert 'tmux send-keys -t "${P0}" x C-m' in capsys.readouterr().out
+
+
+class TestWebCommand:
+    def test_web_launches_streamlit_with_port(self, monkeypatch):
+        calls = {}
+        monkeypatch.setattr(tm.subprocess, "call",
+                            lambda cmd: calls.setdefault("cmd", cmd) and 0)
+        _run(monkeypatch, ["web", "--port", "9000"])
+        cmd = calls["cmd"]
+        assert cmd[1:3] == ["-m", "streamlit"]
+        assert cmd[3] == "run"
+        assert cmd[4].endswith("tmux_manager_web.py")
+        assert cmd[cmd.index("--server.port") + 1] == "9000"
+
+    def test_missing_input_is_usage_error(self, monkeypatch):
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, [])
+        assert exc.value.code == 2
+
+    def test_recipe_command_exits(self, monkeypatch, capsys):
+        import io
+
+        _run(monkeypatch, ["--recipe"], stdin="")
+        assert "begin table" in capsys.readouterr().out

@@ -1132,13 +1132,45 @@ def is_dsl(text):
     return False
 
 
+SAMPLE_DSL = """\
+80 24
+begin table
+begin tr
+begin td
+prop width 30 percentage
+text btop
+end td
+begin td
+prop width - pixels
+text watch -n 2 nvidia-smi
+end td
+end tr
+end table
+"""
+
+
+def run_web(port):
+    """Launch the Streamlit UI (:mod:`deepseek_tools.tmux_manager_web`)."""
+    cmd = [
+        sys.executable, "-m", "streamlit", "run",
+        Path(_web_module().__file__).with_name("tmux_manager_web.py").as_posix(),
+        "--server.port", str(port),
+    ]
+    return subprocess.call(cmd)
+
+
+def _web_module():
+    from deepseek_tools import tmux_manager_web
+    return tmux_manager_web
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Convert tables (HTML / RST / Table Renderer DSL) to a "
                     "tmux Bash script."
     )
     parser.add_argument(
-        "input",
+        "input", nargs="?",
         help="Input file (use '-' for stdin). Format inferred from extension "
              "or content; for stdin you must specify --from.",
     )
@@ -1157,7 +1189,23 @@ def main():
                              "pixel boxes ('boxes').")
     parser.add_argument("--debug", action="store_true",
                         help="Dump the pandoc JSON AST to stderr.")
+    parser.add_argument("--recipe", action="store_true",
+                        help="Print a sample DSL table and exit.")
+    parser.add_argument("--port", type=int, default=8501,
+                        help="Port when opening the web UI.")
     args = parser.parse_args()
+
+    if args.recipe:
+        sys.stdout.write(SAMPLE_DSL)
+        return
+    # `tmux_manager.py web` or `--web` opens the Streamlit UI. The word is
+    # checked here rather than by argparse subparsers, which would reject
+    # ordinary input paths.
+    if args.input == "web":
+        run_web(args.port)
+        return
+    if not getattr(args, "input", None):
+        parser.error("the following arguments are required: input")
 
     if args.input == "-":
         text = sys.stdin.read()
