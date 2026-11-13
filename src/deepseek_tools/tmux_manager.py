@@ -1188,6 +1188,8 @@ def main():
               if chunk.strip()]
     if not tables:
         sys.exit("No tables found in the input.")
+    if not tables:
+        sys.exit("No tables found in the input.")
 
     if args.emit == "boxes":
         chunks = []

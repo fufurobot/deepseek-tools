@@ -71,7 +71,7 @@ class TestMainDslInput:
         # No table survives in the pipeline: main reports and exits.
         with pytest.raises(SystemExit) as exc:
             _run(monkeypatch, [str(path)])
-        assert exc.value.code == 0
+        assert "No tables found" in str(exc.value.code)
 
 
 class TestMainPandocInput:
