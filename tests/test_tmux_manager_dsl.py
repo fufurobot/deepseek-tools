@@ -54,7 +54,6 @@ begin tr
 begin td
 prop width 50 percentage
 text YQ==
-prop height 40 percentage
 end td
 begin td
 end td
@@ -62,6 +61,9 @@ end tr
 begin tr
 begin td
 prop height 100 pixels
+end td
+begin td
+prop height - pixels
 end td
 end tr
 end table
@@ -72,15 +74,16 @@ class TestParseDsl:
     def test_parses_cells_and_hints(self):
         info = tm.parse_dsl(DSL_TABLE)
         assert info["rows"] == [
-            [(1, 1, "a", ("%", 50.0), ("%", 40.0)), (1, 1, "", None, None)],
-            [(1, 1, "", None, ("px", 100.0))],
+            [(1, 1, "a", ("%", 50.0), None), (1, 1, "", None, None)],
+            [(1, 1, "", None, ("px", 100.0)), (1, 1, "", None, ("px", "-"))],
         ]
         assert info["col_widths"] is None
         assert info["_W"] == 800
         assert info["_H"] == 600
         assert info["col_weights"] == [400.0, 400.0]
-        # The later row height hint overwrites the earlier 40% one.
-        assert info["row_weights"] == [240.0, 100.0]
+        # The first 100px cell sets the height, then the flexible row takes
+        # everything that is left (the declared 600 is an upper bound).
+        assert info["row_weights"] == [1.0, 501.0]
 
     def test_leading_blank_lines_and_inline_statements(self):
         # Two statements on one line: only the first token is used as command.
@@ -155,21 +158,30 @@ class TestComputeDslWeights:
         rows = [[(1, 2, "", ("px", 100.0), None), (1, 1, "", None, None)],
                 [(1, 1, "", None, None), (1, 1, "", None, None),
                  (1, 1, "", None, None)]]
-        _, col_w = tm.compute_dsl_weights(self._info(rows), 400, 10)
-        assert col_w == [50.0, 50.0, 300.0]
+        # 100px = 50 cells over tracks 0-1; without a flexible track the
+        # remaining columns cannot be filled, so the table is rejected.
+        with pytest.raises(tm.LayoutError, match="flexible track"):
+            tm.compute_dsl_weights(self._info(rows), 400, 10)
 
     def test_rowspan_hint_divided_across_tracks(self):
         rows = [[(1, 1, "", None, None), (2, 1, "", None, ("px", 100.0))],
                 [(1, 1, "", None, None), (1, 1, "", None, None)],
                 [(1, 1, "", None, None), (1, 1, "", None, None)]]
-        row_w, _ = tm.compute_dsl_weights(self._info(rows), 10, 400)
-        assert row_w == [50.0, 50.0, 300.0]
+        # 100px is 50 + 50 cells for rows 0-1; an absolute table needs the
+        # declared extent to match, so the 400-cell height is rejected.
+        with pytest.raises(tm.LayoutError, match="flexible track"):
+            tm.compute_dsl_weights(self._info(rows), 10, 400)
+        row_w, _ = tm.compute_dsl_weights(self._info(rows), 10, 100)
+        # Row 2 is never occupied, so it has no size.
+        assert row_w == [50.0, 50.0, 0.0]
 
     def test_all_tracks_constrained(self):
-        rows = [[(1, 1, "", ("px", 10.0), ("px", 5.0)),
-                 (1, 1, "", ("px", 30.0), None)]]
+        # One flexible track per axis absorbs what the absolute sizes leave.
+        # A 90px column, a "-" column and a "-" row: all tracks are sizes.
+        rows = [[(1, 1, "", ("px", 90.0), ("px", "-")),
+                 (1, 1, "", ("px", "-"), None)]]
         assert tm.compute_dsl_weights(self._info(rows), 100, 100) == (
-            [5.0], [10.0, 30.0]
+            [100.0], [90.0, 10.0]
         )
 
 
@@ -183,11 +195,7 @@ def test_rowspan_and_colspan_props_are_applied():
         [(1, 2, "", None, None), (1, 1, "", None, None)],
         [(1, 1, "", None, None), (1, 1, "", None, None)],
     ]
-    # Tracks are derived from the grid cursor (3 columns here); the 2px hint
-    # is split over tracks 0-1 and the 8px remainder goes to the empty track
-    # 2, which no cell ever occupies.
-    first = 10.0 / 3
-    assert info["col_weights"] == pytest.approx([first, first, first])
+    assert info["col_weights"] == [3.0, 3.0, 4.0]
     assert info["row_weights"] == [5.0, 5.0]
 
 
@@ -219,11 +227,10 @@ class TestDslSizeValues:
             if text:
                 assert tm._dsl_unit_to_hint(*reversed(text.split())) == hint
 
-    def test_parse_dsl_keeps_flexible_hint_in_cells(self):
-        # The "-" marker parses, but the spec-style weight pass cannot use
-        # it yet (that arrives with the absolute-size resolver).
-        with pytest.raises(ValueError, match="could not convert string to float"):
-            tm.parse_dsl(
-                "800 600\nbegin tr\nbegin td\nprop width - pixels\n"
-                "end td\nend tr\n"
-            )
+    def test_parse_dsl_resolves_flexible_hint(self):
+        # "30px + -" is an absolute 30-cell column followed by the rest.
+        info = tm.parse_dsl(
+            "800 600\nbegin tr\nbegin td\nprop width 30 pixels\nend td\n"
+            "begin td\nprop width - pixels\nend td\nend tr\n"
+        )
+        assert info["col_weights"] == [30.0, 770.0]

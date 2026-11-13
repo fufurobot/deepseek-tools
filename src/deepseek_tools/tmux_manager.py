@@ -208,17 +208,21 @@ def _fmt(value):
 
 def grid_size_hints(rows):
     """Turn table rows into per-axis ``(track, span, hint)`` lists.
-    Percentages are divided across their span; absolute sizes are not."""
-    _, cells, _, _ = _build_grid(rows)
+    Percentages are divided across their span; absolute sizes are not.
+    Empty tracks after the last cell are included so the axis covers them."""
+    _, cells, max_row, max_col = _build_grid(rows)
+    # Tracks are owned by the position after the last cell on the axis.
+    widths = tuple("colspan" for _ in range(max_col))
+    heights = tuple("rowspan" for _ in range(max_row))
     cols, rws = [], []
     for cell in cells.values():
-        for out, track, key, span_key in (
-                (cols, "col", "w_hint", "colspan"),
-                (rws, "row", "h_hint", "rowspan")):
-            hint, span = cell[key], cell[span_key]
+        for out, index, key, axis in (
+                (cols, "col", "w_hint", widths),
+                (rws, "row", "h_hint", heights)):
+            hint, span = cell[key], cell[axis[cell[index]]]
             if hint is not None and hint[0] == "%":
                 hint = ("%", hint[1] / span)
-            out.append((cell[track], span, hint))
+            out.append((cell[index], span, hint))
     return cols, rws
 
 
@@ -242,8 +246,11 @@ def resolve_sizes(hints, total, axis):
 
     WIP: mixed absolute/percentage bounds (rule 3) are not verified yet.
     """
+    if not hints:
+        return []
     tracks = 1 + max((t + span - 1 for t, span, _ in hints), default=-1)
-    extent = 0 if total is None else int(total)
+    unknown = total is None or int(total) <= 0
+    extent = 0 if unknown else int(total)
     claimed = [None] * tracks
     pct = [None] * tracks
     flex = []
@@ -269,6 +276,12 @@ def resolve_sizes(hints, total, axis):
                 claimed[t] = extent * p / 100.0
         used = sum(v for v in claimed if v is not None)
         free = [t for t in range(tracks) if claimed[t] is None]
+        if unknown:
+            # The extent is not known yet (the web UI fills it in later):
+            # percentages stay proportional, free tracks are 1 unit.
+            for t in free:
+                claimed[t] = 1.0
+            return [v if v is not None else 1.0 for v in claimed]
         if free:
             share = (extent - used) / len(free)
             if share < -1:
@@ -277,12 +290,14 @@ def resolve_sizes(hints, total, axis):
                     f"{_fmt(extent)} are available")
             for t in free:
                 claimed[t] = share
-        elif abs(used - extent) >= 1:
+        elif abs(used - extent) >= 1 and not unknown:
             raise LayoutError(
                 f"{axis} percentages need {_fmt(used)} cells but only "
                 f"{_fmt(extent)} are available")
         return _round_to(claimed, extent)
 
+    if unknown:
+        extent = sum(value for _, value in absolute.values())
     for track, (span, value) in absolute.items():
         share = value / span
         for t in range(track, min(tracks, track + span)):
@@ -293,35 +308,42 @@ def resolve_sizes(hints, total, axis):
             claimed[t] = share
     used = sum(v for v in claimed if v is not None)
     free = [t for t in range(tracks) if claimed[t] is None and t not in flex]
-    # A percentage next to absolute sizes is a ceiling on its share of the
-    # axis: the table holds at least used / (1 - pct / 100) cells, so the
-    # declared extent is an upper bound. Unspecified tracks get the rest.
-    share = sum(pct[t] or 0.0 for t in free)
-    if share >= 100.0:
+    fixed = [t for t in free if pct[t] is None]
+    percent = sum(pct[t] or 0.0 for t in free)
+    if percent >= 100.0:
         raise LayoutError(
             f"{axis} percentages leave no room for the absolute sizes")
-    bound = extent
-    if free and share > 0:
-        bound = min(extent, max(used, math.ceil(used / (1.0 - share / 100.0))))
+    if not flex:
+        # No flexible track: the absolute and percentage sizes together must
+        # fill the axis exactly (nothing is invented for empty space).
+        if percent > 0:
+            for t in free:
+                claimed[t] = extent * (pct[t] or 0.0) / 100.0
+                used += claimed[t]
+        if abs(extent - used) >= 1:
+            raise LayoutError(
+                f"{axis} absolute sizes need {_fmt(used)} cells but the table "
+                f"provides {_fmt(extent)}; add a '-' flexible track")
+            extent = with_pct
+        for t in fixed:
+            claimed[t] = 0.0
+        return _round_to(claimed, extent)
+
+    # A flexible '-' track absorbs the rest of the declared extent, after
+    # the percentage tracks took their (never more than declared) share.
+    if percent > 0:
         for t in free:
-            claimed[t] = bound * (pct[t] or 0.0) / 100.0
-        free = [t for t in free if pct[t] is None]
-        used = sum(v for v in claimed if v is not None)
-    if flex:
-        claimed[flex[0]] = bound - used
-        bound = sum(v for v in claimed if v is not None)
-    elif free and abs(bound - used) >= 1:
-        raise LayoutError(
-            f"{axis} absolute sizes need {_fmt(used)} cells but the table "
-            f"provides {_fmt(bound)}; add a '-' flexible track or percentages")
-    for t in free:
+            claimed[t] = extent * (pct[t] or 0.0) / 100.0
+    for t in fixed:
         claimed[t] = 0.0
-    bound = sum(v for v in claimed if v is not None)
-    if any(v is not None and v < -1 for v in claimed):
+    rest = extent - sum(v for v in claimed if v is not None)
+    if rest < -1:
         raise LayoutError(
-            f"{axis} absolute sizes need {_fmt(used)} cells but the table "
-            f"provides {_fmt(bound)}")
-    return _round_to(claimed, bound)
+            f"{axis} absolute sizes need "
+            f"{_fmt(sum(v for v in claimed if v is not None))} cells but the "
+            f"table provides {_fmt(extent)}")
+    claimed[flex[0]] = rest
+    return _round_to(claimed, extent)
 
 
 def _round_to(values, total):
@@ -729,52 +751,15 @@ def parse_dsl(text):
 
 
 def compute_dsl_weights(info, W, H):
-    """Per the DSL spec: explicit constraints fix tracks (divided equally
-    across spans); unconstrained tracks share the remainder equally."""
-    rows = info["rows"]
-    _, cells_info, max_row, max_col = _build_grid(rows)
+    """Resolve the DSL table's hints into absolute cell sizes per track.
 
-    col_explicit = [None] * max_col
-    for cid, cell in cells_info.items():
-        wh = cell["w_hint"]
-        if wh is None:
-            continue
-        unit, val = wh
-        length = (W * val / 100.0) if unit == "%" else float(val)
-        k = cell["colspan"]
-        per = length / k
-        for t in range(k):
-            col_explicit[cell["col"] + t] = per
-
-    S_w = sum(v for v in col_explicit if v is not None)
-    n_unc = sum(1 for v in col_explicit if v is None)
-    if n_unc > 0:
-        per_unc = (W - S_w) / n_unc
-        col_weights = [v if v is not None else per_unc for v in col_explicit]
-    else:
-        col_weights = col_explicit
-
-    row_explicit = [None] * max_row
-    for cid, cell in cells_info.items():
-        hh = cell["h_hint"]
-        if hh is None:
-            continue
-        unit, val = hh
-        length = (H * val / 100.0) if unit == "%" else float(val)
-        l = cell["rowspan"]
-        per = length / l
-        for t in range(l):
-            row_explicit[cell["row"] + t] = per
-
-    S_h = sum(v for v in row_explicit if v is not None)
-    n_unc = sum(1 for v in row_explicit if v is None)
-    if n_unc > 0:
-        per_unc = (H - S_h) / n_unc
-        row_weights = [v if v is not None else per_unc for v in row_explicit]
-    else:
-        row_weights = row_explicit
-
-    return row_weights, col_weights
+    Returns ``(row_sizes, col_sizes)``; see :func:`resolve_sizes` and the
+    module docstring for the absolute/relative rules. ``W``/``H`` are the
+    declared extent in character cells (``None``/absent when unknown)."""
+    cols, rws = grid_size_hints(info["rows"])
+    col_sizes = resolve_sizes(cols, W, "width")
+    row_sizes = resolve_sizes(rws, H, "height")
+    return row_sizes, col_sizes
 
 
 # ======================================================================
