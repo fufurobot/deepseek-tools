@@ -293,23 +293,28 @@ def resolve_sizes(hints, total, axis):
             claimed[t] = share
     used = sum(v for v in claimed if v is not None)
     free = [t for t in range(tracks) if claimed[t] is None and t not in flex]
-    ratio = sum(pct[t] for t in free if pct[t] is not None) / 100.0
-    if ratio >= 1.0:
+    # A percentage next to absolute sizes is a ceiling on its share of the
+    # axis: the table holds at least used / (1 - pct / 100) cells, so the
+    # declared extent is an upper bound. Unspecified tracks get the rest.
+    share = sum(pct[t] or 0.0 for t in free)
+    if share >= 100.0:
         raise LayoutError(
             f"{axis} percentages leave no room for the absolute sizes")
     bound = extent
-    if free and ratio > 0:
-        bound = min(extent, math.floor(used / (1.0 - ratio) + 1e-9))
+    if free and share > 0:
+        bound = min(extent, max(used, math.ceil(used / (1.0 - share / 100.0))))
         for t in free:
-            claimed[t] = (bound - used) * (pct[t] or 0.0) / 100.0 / ratio
+            claimed[t] = bound * (pct[t] or 0.0) / 100.0
+        free = [t for t in free if pct[t] is None]
+        used = sum(v for v in claimed if v is not None)
     if flex:
-        claimed[flex[0]] = bound - sum(
-            v for v in claimed if v is not None)
-    elif abs(bound - used) >= 1:
-        # Absolute mode never invents space for unspecified tracks.
+        claimed[flex[0]] = bound - used
+    elif free and abs(bound - used) >= 1:
         raise LayoutError(
             f"{axis} absolute sizes need {_fmt(used)} cells but the table "
             f"provides {_fmt(bound)}; add a '-' flexible track or percentages")
+    for t in free:
+        claimed[t] = 0.0
     if any(v is not None and v < -1 for v in claimed):
         raise LayoutError(
             f"{axis} absolute sizes need {_fmt(used)} cells but the table "

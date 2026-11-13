@@ -83,8 +83,9 @@ class TestAbsoluteMode:
         with pytest.raises(tm.LayoutError, match="flexible track"):
             tm.resolve_sizes(_h(("px", 10.0), None), 100, "width")
 
-    def test_absolute_hints_must_cover_the_table(self):
-        # 10 + 10 cells in a table declared 100 cells wide leaves 80 cells
-        # unassigned: reported instead of silently stretched.
-        with pytest.raises(tm.LayoutError, match="provides 100"):
-            tm.resolve_sizes(_h(("px", 10.0), ("px", 10.0)), 100, "width")
+    def test_absolute_hints_can_shrink_the_declared_table(self):
+        # 10 + 10 cells describe a 20-cell table; the declared 100 cells is
+        # only an upper bound, so the sizes are used as given.
+        assert tm.resolve_sizes(_h(("px", 10.0), ("px", 10.0)), 100, "w") == [
+            10.0, 10.0
+        ]
