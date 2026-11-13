@@ -649,9 +649,11 @@ def _dsl_unit_to_hint(unit, value):
     return (unit, float(number))
 
 
-def parse_dsl(text):
-    """Parse Table Renderer DSL. Returns an info dict in internal format,
-    with row_weights/col_weights pre-computed per the spec."""
+def parse_dsl(text, resolve=True):
+    """Parse Table Renderer DSL. Returns an info dict in internal format
+    with ``row_sizes``/``col_sizes``; the legacy
+    ``row_weights``/``col_weights`` keys are the same numbers. With
+    ``resolve=False`` no layout is computed (handy for round trips)."""
     lines = text.splitlines()
     idx = 0
     while idx < len(lines) and not lines[idx].strip():
@@ -738,10 +740,34 @@ def parse_dsl(text):
         ])
 
     info = {"rows": converted, "col_widths": None, "_W": W, "_H": H}
-    row_weights, col_weights = compute_dsl_weights(info, W, H)
-    info["row_weights"] = row_weights
-    info["col_weights"] = col_weights
+    if resolve:
+        row_sizes, col_sizes = compute_dsl_weights(info, W, H)
+        info["row_sizes"] = row_sizes
+        info["col_sizes"] = col_sizes
     return info
+
+
+def dsl_serialize(info):
+    """Render a table dict (``{"rows": ..., "_W": ..., "_H": ...}``) as
+    Table Renderer DSL text. Texts are Base64-encoded so they stay safe."""
+    lines = [f"{int(info.get('_W') or 0)} {int(info.get('_H') or 0)}",
+             "begin table"]
+    for row in info["rows"]:
+        lines.append("begin tr")
+        for rowspan, colspan, text, w_hint, h_hint in row:
+            lines.append("begin td")
+            for prop, value in (("rowspan", rowspan), ("colspan", colspan)):
+                if value != 1:
+                    lines.append(f"prop {prop} {value} pixels")
+            for prop, hint in (("width", w_hint), ("height", h_hint)):
+                if hint is not None:
+                    lines.append(f"prop {prop} {dsl_hint_text(hint)}")
+            if text:
+                lines.append(f"text {encode_word(text)}")
+            lines.append("end td")
+        lines.append("end tr")
+    lines.append("end table")
+    return "\n".join(lines) + "\n"
 
 
 def compute_dsl_weights(info, W, H):
@@ -760,6 +786,8 @@ def compute_dsl_weights(info, W, H):
 # 6. Layout generation
 # ======================================================================
 def _pick_weights(info):
+    if "row_sizes" in info and "col_sizes" in info:
+        return info["row_sizes"], info["col_sizes"]
     if "row_weights" in info and "col_weights" in info:
         return info["row_weights"], info["col_weights"]
     return compute_weights(info)

@@ -80,10 +80,10 @@ class TestParseDsl:
         assert info["col_widths"] is None
         assert info["_W"] == 800
         assert info["_H"] == 600
-        assert info["col_weights"] == [400.0, 400.0]
+        assert info["col_sizes"] == [400.0, 400.0]
         # The first 100px cell sets the height, then the flexible row takes
         # everything that is left (the declared 600 is an upper bound).
-        assert info["row_weights"] == [1.0, 501.0]
+        assert info["row_sizes"] == [1.0, 501.0]
 
     def test_leading_blank_lines_and_inline_statements(self):
         # Two statements on one line: only the first token is used as command.
@@ -195,8 +195,8 @@ def test_rowspan_and_colspan_props_are_applied():
         [(1, 2, "", None, None), (1, 1, "", None, None)],
         [(1, 1, "", None, None), (1, 1, "", None, None)],
     ]
-    assert info["col_weights"] == [3.0, 3.0, 4.0]
-    assert info["row_weights"] == [5.0, 5.0]
+    assert info["col_sizes"] == [3.0, 3.0, 4.0]
+    assert info["row_sizes"] == [5.0, 5.0]
 
 
 class TestDslSizeValues:
@@ -233,4 +233,4 @@ class TestDslSizeValues:
             "800 600\nbegin tr\nbegin td\nprop width 30 pixels\nend td\n"
             "begin td\nprop width - pixels\nend td\nend tr\n"
         )
-        assert info["col_weights"] == [30.0, 770.0]
+        assert info["col_sizes"] == [30.0, 770.0]
