@@ -20,7 +20,7 @@ def test_html_becomes_dsl_first(monkeypatch):
             [("a", 1, 1), ("b", 1, 1)], [("c", 1, 2)]])}]}}
     monkeypatch.setattr(tm, "pandoc_json", lambda text, fmt: ast)
     text = tm.to_dsl(HTML, "html")
-    assert text.startswith("0 0\nbegin table\n")
+    assert text.startswith("80 24\nbegin table\n")
     assert "prop width 20 percentage" in text
     assert "prop width 12 pixels" in text
     assert "prop colspan 2" in text
