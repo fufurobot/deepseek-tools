@@ -129,3 +129,14 @@ def test_size_editor_reports_edits():
     assert rows == [((1, 1, "btop", ("px", "-"), ("%", 12.0)),
                      (1, 1, "watch -n 2 nvidia-smi", ("px", "-"),
                       ("%", 12.0)))]
+
+
+def test_html_frontend_renders_through_the_page():
+    app = _app()
+    app.radio[0].set_value("HTML").run(timeout=30)
+    app.text_area[0].set_value(
+        '<table><tr><td>btop</td><td>htop</td></tr></table>').run(timeout=30)
+    app.button[0].click().run(timeout=30)
+    assert not app.exception
+    assert "begin table" in app.code[0].value
+    assert "tmux send-keys" in app.code[1].value
