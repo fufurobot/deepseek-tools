@@ -1159,8 +1159,10 @@ def render_boxes(info):
         rs, cs = cell["rowspan"], cell["colspan"]
         x = x_int[c]
         y = y_int[r]
-        w = x_int[c + cs] - x
-        h = y_int[r + rs] - y
+        # #FIXME a span whose tracks were not all sized stops at the last
+        # sized track instead of covering the whole table.
+        w = x_int[min(c + cs, len(x_int) - 1)] - x
+        h = y_int[min(r + rs, len(y_int) - 1)] - y
         word = encode_word(cell["text"])
         boxes.append((x, y, w, h, word))
     boxes.sort()
