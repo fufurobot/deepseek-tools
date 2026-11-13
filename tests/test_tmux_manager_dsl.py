@@ -102,3 +102,72 @@ class TestParseDsl:
             "end td\nend tr\nend table\n"
         )
         assert info["rows"] == [[(1, 2, "", None, None)]]
+
+    def test_end_without_tag_is_unknown(self):
+        with pytest.raises(ValueError, match="Unknown end tag"):
+            tm.parse_dsl("10 10\nend\n")
+
+    @pytest.mark.parametrize(
+        "text,message",
+        [
+            ("", "Empty DSL input"),
+            ("\n \n", "Empty DSL input"),
+            ("800\n", "Expected 'W H'"),
+            ("800 600 1\n", "Expected 'W H'"),
+            ("wx 600\n", "two integers"),
+            ("800 600\nbegin\n", "Malformed begin"),
+            ("800 600\nbegin body\n", "Unknown tag"),
+            ("800 600\nprop width 1 pixels\n", "prop outside cell"),
+            ("800 600\nbegin tr\nbegin td\nprop width\n", "Malformed prop"),
+            ("800 600\nbegin tr\nbegin td\nprop nope 1 pixels\n", "Unknown prop"),
+            ("800 600\nbegin tr\nbegin td\ntext\n", "Malformed text"),
+            ("800 600\nbegin tr\ntext eA==\n", "text outside cell"),
+            ("800 600\nbegin tr\nbegin td\nend td\nend td\n",
+             "end td without open cell"),
+            ("800 600\nbegin tr\nbegin td\nbogus\n", "Unknown command"),
+            ("800 600\nbegin td\nprop width 5 metres\nend td\n",
+             "Unknown DSL unit"),
+            ("800 600\nbegin td\nprop width x pixels\nend td\n",
+             "invalid literal"),
+        ],
+    )
+    def test_errors(self, text, message):
+        with pytest.raises(ValueError, match=message):
+            tm.parse_dsl(text)
+
+
+class TestComputeDslWeights:
+    def _info(self, rows):
+        return {"rows": rows}
+
+    def test_unconstrained_split_evenly(self):
+        rows = [[(1, 1, "", None, None), (1, 1, "", None, None)]]
+        assert tm.compute_dsl_weights(self._info(rows), 100, 50) == (
+            [50.0], [50.0, 50.0]
+        )
+
+    def test_percentage_hints_are_of_total(self):
+        rows = [[(1, 1, "", ("%", 25.0), None), (1, 1, "", None, None)]]
+        row_w, col_w = tm.compute_dsl_weights(self._info(rows), 400, 10)
+        assert col_w == [100.0, 300.0]
+
+    def test_colspan_hint_divided_across_tracks(self):
+        rows = [[(1, 2, "", ("px", 100.0), None), (1, 1, "", None, None)],
+                [(1, 1, "", None, None), (1, 1, "", None, None),
+                 (1, 1, "", None, None)]]
+        _, col_w = tm.compute_dsl_weights(self._info(rows), 400, 10)
+        assert col_w == [50.0, 50.0, 300.0]
+
+    def test_rowspan_hint_divided_across_tracks(self):
+        rows = [[(1, 1, "", None, None), (2, 1, "", None, ("px", 100.0))],
+                [(1, 1, "", None, None), (1, 1, "", None, None)],
+                [(1, 1, "", None, None), (1, 1, "", None, None)]]
+        row_w, _ = tm.compute_dsl_weights(self._info(rows), 10, 400)
+        assert row_w == [50.0, 50.0, 300.0]
+
+    def test_all_tracks_constrained(self):
+        rows = [[(1, 1, "", ("px", 10.0), ("px", 5.0)),
+                 (1, 1, "", ("px", 30.0), None)]]
+        assert tm.compute_dsl_weights(self._info(rows), 100, 100) == (
+            [5.0], [10.0, 30.0]
+        )
