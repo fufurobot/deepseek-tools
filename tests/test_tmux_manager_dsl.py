@@ -175,7 +175,8 @@ class TestComputeDslWeights:
 
 def test_rowspan_and_colspan_props_are_applied():
     info = tm.parse_dsl(
-        "10 10\nbegin tr\nbegin td\nprop rowspan 2\nprop colspan 3\n"
+        "10 10\nbegin tr\nbegin td\nprop rowspan 2 pixels\n"
+        "prop colspan 3 pixels\n"
         "end td\nbegin td\nend td\nbegin td\nend td\nbegin td\nend td\n"
         "end tr\nend table\n"
     )
