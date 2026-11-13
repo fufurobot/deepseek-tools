@@ -212,13 +212,13 @@ def grid_size_hints(rows):
     _, cells, _, _ = _build_grid(rows)
     cols, rws = [], []
     for cell in cells.values():
-        for axis, key, span_key in (("cols", "w_hint", "colspan"),
-                                    ("rows", "h_hint", "rowspan")):
+        for out, track, key, span_key in (
+                (cols, "col", "w_hint", "colspan"),
+                (rws, "row", "h_hint", "rowspan")):
             hint, span = cell[key], cell[span_key]
             if hint is not None and hint[0] == "%":
                 hint = ("%", hint[1] / span)
-            (cols if axis == "cols" else rws).append(
-                (cell["col" if axis == "cols" else "row"], span, hint))
+            out.append((cell[track], span, hint))
     return cols, rws
 
 
