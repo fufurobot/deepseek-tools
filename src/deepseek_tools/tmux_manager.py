@@ -195,6 +195,137 @@ class _HTMLCellAttrsExtractor(HTMLParser):
 
 
 # ======================================================================
+# 2b. Size resolution: absolute pixels/em vs relative percentages
+# ======================================================================
+class LayoutError(ValueError):
+    """Raised for conflicting or impossible size constraints."""
+
+
+def _fmt(value):
+    """Render a cell count for messages (12.0 -> '12', 2.5 -> '2.5')."""
+    return f"{value:g}"
+
+
+def grid_size_hints(rows):
+    """Turn table rows into per-axis ``(track, span, hint)`` lists.
+    Percentages are divided across their span; absolute sizes are not."""
+    _, cells, _, _ = _build_grid(rows)
+    cols, rws = [], []
+    for cell in cells.values():
+        for axis, key, span_key in (("cols", "w_hint", "colspan"),
+                                    ("rows", "h_hint", "rowspan")):
+            hint, span = cell[key], cell[span_key]
+            if hint is not None and hint[0] == "%":
+                hint = ("%", hint[1] / span)
+            (cols if axis == "cols" else rws).append(
+                (cell["col" if axis == "cols" else "row"], span, hint))
+    return cols, rws
+
+
+def resolve_sizes(hints, total, axis):
+    """Resolve one axis into absolute integer cell sizes summing to *total*.
+
+    ``hints`` is ``[(track, span, hint)]`` for every cell of the grid,
+    ``total`` the extent in cells (``None`` = provisional) and ``axis``
+    names the axis for messages. Rules, in order:
+
+    1. With no absolute hints the axis is *relative*: percentage tracks
+       take ``total * pct / 100`` (a spanning percentage is already
+       divided by its span) and unconstrained tracks share the remainder.
+    2. An absolute ``px`` hint owns its span with ``value / span`` per
+       track, fixing the extent; only a ``-`` hint absorbs the rest.
+    3. A percentage next to absolute sizes is a ceiling on its share of the
+       axis, so it can only shrink the table.
+    4. Percentages that over-commit the table raise ``LayoutError``.
+    5. Rounding slack goes to the largest fractional parts, so the sizes
+       always add up to *total* exactly.
+
+    WIP: mixed absolute/percentage bounds (rule 3) are not verified yet.
+    """
+    tracks = 1 + max((t + span - 1 for t, span, _ in hints), default=-1)
+    extent = 0 if total is None else int(total)
+    claimed = [None] * tracks
+    pct = [None] * tracks
+    flex = []
+    absolute = {}
+    for track, span, hint in hints:
+        if hint is None:
+            continue
+        if hint[0] == "%":
+            for t in range(track, min(tracks, track + span)):
+                pct[t] = float(hint[1])
+        elif hint[1] == "-":
+            flex.append(track)
+        else:
+            absolute[track] = (span, float(hint[1]))
+    if len(flex) > 1:
+        raise LayoutError(
+            f"only one flexible '-' {axis} track is allowed, found {len(flex)}")
+    if not absolute:
+        for t, p in enumerate(pct):
+            if p is not None:
+                claimed[t] = extent * p / 100.0
+        used = sum(v for v in claimed if v is not None)
+        free = [t for t in range(tracks) if claimed[t] is None]
+        if free:
+            share = (extent - used) / len(free)
+            if share < -1:
+                raise LayoutError(
+                    f"{axis} percentages need {_fmt(used)} cells but only "
+                    f"{_fmt(extent)} are available")
+            for t in free:
+                claimed[t] = share
+        elif abs(used - extent) >= 1:
+            raise LayoutError(
+                f"{axis} percentages need {_fmt(used)} cells but only "
+                f"{_fmt(extent)} are available")
+        return _round_to(claimed, extent)
+
+    for track, (span, value) in absolute.items():
+        share = value / span
+        for t in range(track, min(tracks, track + span)):
+            if claimed[t] is not None and abs(claimed[t] - share) > 1e-9:
+                raise LayoutError(
+                    f"{axis} track {t}: absolute sizes disagree "
+                    f"({_fmt(claimed[t])} and {_fmt(share)} cells)")
+            claimed[t] = share
+    used = sum(v for v in claimed if v is not None)
+    free = [t for t in range(tracks) if claimed[t] is None and t not in flex]
+    ratio = sum(pct[t] for t in free if pct[t] is not None) / 100.0
+    if ratio >= 1.0:
+        raise LayoutError(
+            f"{axis} percentages leave no room for the absolute sizes")
+    bound = extent
+    if free and ratio > 0:
+        bound = min(extent, math.floor(used / (1.0 - ratio) + 1e-9))
+        for t in free:
+            claimed[t] = (bound - used) * (pct[t] or 0.0) / 100.0 / ratio
+    if flex:
+        claimed[flex[0]] = bound - sum(
+            v for v in claimed if v is not None)
+    elif free and abs(bound - used) >= 1:
+        raise LayoutError(
+            f"{axis} absolute sizes need {_fmt(used)} cells but the table "
+            f"provides {_fmt(bound)}; add a '-' flexible track or percentages")
+    if any(v is not None and v < -1 for v in claimed):
+        raise LayoutError(
+            f"{axis} absolute sizes need {_fmt(used)} cells but the table "
+            f"provides {_fmt(bound)}")
+    return _round_to(claimed, bound)
+
+
+def _round_to(values, total):
+    """Round sizes to whole cells so they add up to *total* exactly."""
+    base = [int(math.floor(v + 1e-9)) for v in values]
+    missing = int(round(total)) - sum(base)
+    order = sorted(range(len(values)), key=lambda i: (values[i] - base[i], i),
+                   reverse=True)
+    for i in order[:max(0, missing)]:
+        base[i] += 1
+    return [float(v) for v in base]
+
+
+# ======================================================================
 # 3. Pandoc table extraction
 # ======================================================================
 def unwrap_ctor(node, tag):
