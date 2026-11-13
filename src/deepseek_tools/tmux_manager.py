@@ -981,6 +981,93 @@ def _axis_sizes(info, cells_info):
     return sizes["height"], sizes["width"]
 
 
+HTML_RELATIVE_ATTRS = ("width", "height")
+
+
+def _table_body(rows, widths=None):
+    """Build a pandoc 3.x Table payload with ``(text, rowspan, colspan)``
+    cells (shared by tests and frontends)."""
+    def cell(text, rowspan, colspan):
+        return {"t": "Cell", "c": [["", [], []], {"t": "AlignDefault"},
+                                   rowspan, colspan,
+                                   [{"t": "Para", "c": [{"t": "Str",
+                                                         "c": text}]}]]}
+    body = {"t": "TableBody", "c": ["", 0,
+                                    [{"t": "Row", "c": ["", [cell(*c)
+                                                             for c in row]]}
+                                     for row in rows], []]}
+    colspecs = [["AlignDefault", {"t": "ColWidth", "c": w}]
+                for w in widths] if widths else []
+    return [["", [], []], ["", []], colspecs,
+            {"t": "TableHead", "c": ["", []]}, [body],
+            {"t": "TableHead", "c": ["", []]}]
+
+
+# HTML width/height hints are relative (a fraction of the pane) *unless*
+# they use px/em/pt, which are absolute character cells. Values without a
+# unit are widest-practice pixels in browsers, but for a terminal layout a
+# bare number is read as characters - see README "Size units".
+def _html_sizes(html_source, tables):
+    """Attach hints parsed from the HTML attributes to the pandoc cells."""
+    parser = _HTMLCellAttrsExtractor()
+    try:
+        parser.feed(html_source)
+        parser.close()
+    except Exception:            # pragma: no cover - html.parser is lenient
+        return tables
+    idx = 0
+    for table in tables:
+        for row in table["rows"]:
+            for i, (rowspan, colspan, text, w_hint, h_hint) in enumerate(row):
+                if idx >= len(parser.cells):
+                    return tables
+                cell = parser.cells[idx]
+                idx += 1
+                if (cell["rowspan"], cell["colspan"]) != (rowspan, colspan):
+                    return tables
+                row[i] = (rowspan, colspan, text,
+                          w_hint or cell["w_hint"], h_hint or cell["h_hint"])
+    return tables
+
+
+def _colpct(widths, col):
+    """Percentage hint from a pandoc column width (1.0 == 100%)."""
+    if col >= len(widths) or widths[col] is None:
+        return None
+    return ("%", round(widths[col] * 100.0, 2))
+
+
+def to_dsl(text, from_format):
+    """Parse any frontend into Table Renderer DSL text.
+
+    ``from_format`` is ``"dsl"`` (returned unchanged), ``"html"`` or
+    ``"rst"`` (parsed with pandoc; HTML ``width``/``height`` attributes are
+    added as size hints). :func:`main` and the web UI only ever hand DSL
+    to :func:`parse_dsl`, so every frontend follows the same path.
+    """
+    from_format = from_format.lower()
+    if from_format == "dsl":
+        return text
+    if from_format not in ("html", "rst"):
+        raise ValueError(f"Unsupported frontend: {from_format!r}")
+    ast = pandoc_json(text, from_format)
+    tables = extract_tables(ast)
+    if not tables:
+        raise ValueError("No tables found in the input.")
+    if from_format == "html":
+        tables = _html_sizes(text, tables)
+    else:
+        # Pandoc column widths (fractions of the table) are the RST
+        # frontend's relative sizes; they become percentages.
+        for table in tables:
+            widths = table.get("col_widths") or []
+            for r, row in enumerate(table["rows"]):
+                table["rows"][r] = [
+                    (rs, cs, t, w_hint or _colpct(widths, c), h)
+                    for c, (rs, cs, t, w_hint, h) in enumerate(row)]
+    return "\n# ---\n".join(dsl_serialize(t) for t in tables)
+
+
 def render_boxes(info):
     rows = info["rows"]
     _, cells_info, max_row, max_col = _build_grid(rows)
