@@ -309,12 +309,14 @@ def resolve_sizes(hints, total, axis):
         used = sum(v for v in claimed if v is not None)
     if flex:
         claimed[flex[0]] = bound - used
+        bound = sum(v for v in claimed if v is not None)
     elif free and abs(bound - used) >= 1:
         raise LayoutError(
             f"{axis} absolute sizes need {_fmt(used)} cells but the table "
             f"provides {_fmt(bound)}; add a '-' flexible track or percentages")
     for t in free:
         claimed[t] = 0.0
+    bound = sum(v for v in claimed if v is not None)
     if any(v is not None and v < -1 for v in claimed):
         raise LayoutError(
             f"{axis} absolute sizes need {_fmt(used)} cells but the table "
