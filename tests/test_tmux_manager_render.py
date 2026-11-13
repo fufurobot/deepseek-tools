@@ -90,10 +90,10 @@ class TestIsDsl:
     @pytest.mark.parametrize(
         "text",
         [
-            # A second statement whose command is not "begin table" is still
-            # accepted: only the first statement after "W H" is inspected.
+            # The first statement after "W H" must be "begin" with any tag;
+            # the tag is not required to be "table".
+            "800 600\nbegin tr\n",
             "800 600\nbegin table\n",
-            "800 600\nbegin td\n",
         ],
     )
     def test_true_for_any_begin_after_header(self, text):
