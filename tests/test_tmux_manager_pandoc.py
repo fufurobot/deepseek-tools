@@ -122,3 +122,12 @@ class TestCellTextFromBlocks:
 
     def test_empty_list(self):
         assert tm.cell_text_from_blocks([]) == ""
+
+
+def test_pandoc_json_rejects_invalid_json(monkeypatch):
+    class Proc:
+        stdout = b"not json"
+
+    monkeypatch.setattr(tm.subprocess, "run", lambda cmd, **kw: Proc())
+    with pytest.raises(ValueError):
+        tm.pandoc_json("x", "html")
