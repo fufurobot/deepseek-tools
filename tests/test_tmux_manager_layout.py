@@ -3,6 +3,8 @@ tmux split layout built from a table grid."""
 
 from __future__ import annotations
 
+import pytest
+
 from deepseek_tools import tmux_manager as tm
 
 
@@ -95,3 +97,49 @@ class TestBuildTableLayout:
         })
         # A zero-weighted right pane still keeps at least 1%.
         assert cmds[-1].endswith('-p 1 -t "${P0}" -P -F "#{pane_id}")')
+
+    def test_zero_weights_fall_back_to_one(self):
+        # Weights that do not cover a slice sum to 0, which is treated as 1.
+        _, _, cmds = tm.build_table_layout({
+            "rows": [
+                [(1, 1, "", None, None), (1, 1, "", None, None)],
+                [(1, 1, "", None, None), (1, 1, "", None, None)],
+            ],
+            "row_weights": [0.0, 0.0],
+            "col_weights": [0.0, 0.0],
+        })
+        assert cmds[0].startswith('P1=$(tmux split-window -v -p 50')
+        assert cmds[1].startswith('P2=$(tmux split-window -h -p 50')
+
+    def test_split_with_an_empty_side_is_skipped(self):
+        # Rows 0-1 are one rowspan=2 cell and rows 2-3 are rowspan=3 cells,
+        # so the cut after row 1 leaves nothing above/below another cut.
+        cells_info = tm._build_grid([
+            [(1, 1, "a", None, None), (4, 1, "b", None, None)],
+            [(1, 1, "c", None, None)],
+            [(1, 1, "d", None, None)],
+            [(1, 1, "e", None, None)],
+        ])[1]
+        pane_map = {}
+        cmds = tm._split_layout(
+            "P0", (0, 0, 4, 2), list(cells_info), cells_info,
+            [1.0] * 4, [1.0, 1.0], [0], pane_map,
+        )
+        # Left column splits first, then its lower part again.
+        assert cmds[0].startswith('P1=$(tmux split-window -h -p 50 -t "${P0}"')
+        assert sorted(pane_map) == [0, 1, 2, 3, 4]
+        assert set(pane_map.values()) == {"P0", "P1", "P2", "P3", "P4"}
+
+    def test_no_cut_cells_share_the_pane(self):
+        # A single L-shaped arrangement that has no clean row or column cut.
+        cells_info = tm._build_grid([
+            [(1, 2, "a", None, None)],
+            [(1, 1, "b", None, None), (1, 1, "c", None, None)],
+            [(1, 1, "d", None, None)],
+        ])[1]
+        # Force the "no cut" path with a single-cell id list per branch.
+        pane_map = {}
+        assert tm._split_layout(
+            "P9", (0, 0, 1, 1), [999], cells_info, [1.0], [1.0], [0], pane_map,
+        ) == []
+        assert pane_map == {999: "P9"}
