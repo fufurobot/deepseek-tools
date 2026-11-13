@@ -171,3 +171,15 @@ class TestComputeDslWeights:
         assert tm.compute_dsl_weights(self._info(rows), 100, 100) == (
             [5.0], [10.0, 30.0]
         )
+
+
+def test_rowspan_and_colspan_props_are_applied():
+    info = tm.parse_dsl(
+        "10 10\nbegin tr\nbegin td\nprop rowspan 2\nprop colspan 3\n"
+        "end td\nbegin td\nend td\nbegin td\nend td\nbegin td\nend td\n"
+        "end tr\nend table\n"
+    )
+    assert info["rows"] == [[(2, 3, "", None, None), (1, 1, "", None, None),
+                             (1, 1, "", None, None), (1, 1, "", None, None)]]
+    assert info["col_weights"] == [10.0, 10.0, 10.0, 10.0]
+    assert info["row_weights"] == [5.0, 5.0]
