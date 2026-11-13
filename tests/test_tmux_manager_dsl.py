@@ -45,3 +45,60 @@ class TestDslUnitToHint:
     def test_unknown_unit(self):
         with pytest.raises(ValueError):
             tm._dsl_unit_to_hint("metres", 1)
+
+
+DSL_TABLE = """\
+800 600
+begin table
+begin tr
+begin td
+prop width 50 percentage
+text YQ==
+prop height 40 percentage
+end td
+begin td
+end td
+end tr
+begin tr
+begin td
+prop height 100 pixels
+end td
+end tr
+end table
+"""
+
+
+class TestParseDsl:
+    def test_parses_cells_and_hints(self):
+        info = tm.parse_dsl(DSL_TABLE)
+        assert info["rows"] == [
+            [(1, 1, "a", ("%", 50.0), ("%", 40.0)), (1, 1, "", None, None)],
+            [(1, 1, "", None, ("px", 100.0))],
+        ]
+        assert info["col_widths"] is None
+        assert info["_W"] == 800
+        assert info["_H"] == 600
+        assert info["col_weights"] == [400.0, 400.0]
+        # The later row height hint overwrites the earlier 40% one.
+        assert info["row_weights"] == [240.0, 100.0]
+
+    def test_leading_blank_lines_and_inline_statements(self):
+        # Two statements on one line: only the first token is used as command.
+        text = "\n  \n" + DSL_TABLE
+        assert tm.parse_dsl(text)["_W"] == 800
+        # "begin tr begin td end td end tr" is one "begin tr" statement, so
+        # the row stays empty.
+        assert tm.parse_dsl("10 10\nbegin tr begin td end td end tr\n")["rows"] == [
+            []
+        ]
+
+    def test_default_props(self):
+        info = tm.parse_dsl("10 10\nbegin tr\nbegin td\ntext eA==\nend td\nend tr\n")
+        assert info["rows"] == [[(1, 1, "x", None, None)]]
+
+    def test_end_table_and_extra_tokens(self):
+        info = tm.parse_dsl(
+            "10 10\nbegin table\nbegin tr\nbegin td\nprop colspan 2 extra\n"
+            "end td\nend tr\nend table\n"
+        )
+        assert info["rows"] == [[(1, 2, "", None, None)]]
