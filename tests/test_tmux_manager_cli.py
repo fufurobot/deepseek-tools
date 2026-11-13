@@ -168,3 +168,10 @@ class TestMainPandocInput:
         monkeypatch.setattr(tm, "pandoc_json", fake_pandoc_json)
         _run(monkeypatch, [str(path), "--no-attach"])
         assert seen["fmt"] == "rst"
+
+
+class TestMainStdin:
+    def test_stdin_with_explicit_from(self, monkeypatch, capsys):
+        _run(monkeypatch, ["-", "--from", "dsl", "-o", "-"],
+             stdin=DSL.replace("begin table", "begin table "))  # not auto-detected
+        assert 'tmux send-keys -t "${P0}" x C-m' in capsys.readouterr().out
