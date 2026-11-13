@@ -73,3 +73,52 @@ class TestCollectInlines:
 
     def test_code_with_short_payload(self):
         assert tm.collect_inlines([{"t": "Code", "c": ["only"]}]) == ""
+
+    @pytest.mark.parametrize(
+        "kind", ["Emph", "Strong", "Strikeout", "Superscript",
+                 "Subscript", "SmallCaps"]
+    )
+    def test_formatting_wrappers(self, kind):
+        node = {"t": kind, "c": [_str("bold")]}
+        assert tm.collect_inlines([node]) == "bold"
+
+    @pytest.mark.parametrize("kind", ["Link", "Quoted", "Cite", "Span"])
+    def test_second_element_wrappers(self, kind):
+        node = {"t": kind, "c": [["", [], []], [_str("inner")]]}
+        assert tm.collect_inlines([node]) == "inner"
+
+    def test_image_is_dropped(self):
+        img = {"t": "Image", "c": [["", [], []], [], ["", "alt"]]}
+        assert tm.collect_inlines([img, _str("x")]) == "x"
+
+    def test_math(self):
+        node = {"t": "Math", "c": [{"t": "InlineMath"}, "x^2"]}
+        assert tm.collect_inlines([node]) == "x^2"
+
+    def test_math_with_short_payload(self):
+        assert tm.collect_inlines([{"t": "Math", "c": []}]) == ""
+
+    def test_unknown_kind_is_ignored(self):
+        node = {"t": "RawInline", "c": ["html", "<br>"]}
+        assert tm.collect_inlines([node]) == ""
+
+
+class TestCellTextFromBlocks:
+    def test_non_list_returns_empty(self):
+        assert tm.cell_text_from_blocks(None) == ""
+
+    def test_joins_plain_and_para(self):
+        blocks = [
+            _para(_str("one")),
+            {"t": "CodeBlock", "c": ["", "x"]},
+            _para(_str("two")),
+            "junk",
+        ]
+        assert tm.cell_text_from_blocks(blocks) == "one\ntwo"
+
+    def test_strips_surrounding_whitespace(self):
+        blocks = [_para(_str("  padded  "))]
+        assert tm.cell_text_from_blocks(blocks) == "padded"
+
+    def test_empty_list(self):
+        assert tm.cell_text_from_blocks([]) == ""
