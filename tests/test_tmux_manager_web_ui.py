@@ -40,11 +40,11 @@ def test_convert_shows_dsl_script_and_boxes():
     assert not app.exception
     assert "begin table" in app.code[0].value
     assert "tmux send-keys" in app.code[1].value
-    # The first render has no boxes: only the DSL and the script.
-    assert len(app.code) == 2
+    # The first render has no boxes: DSL, script and the laid-out DSL.
+    assert len(app.code) == 3
     app.checkbox[0].set_value(True).run(timeout=30)
     app.button[0].click().run(timeout=30)
-    assert " YnRvcA==" in app.code[2].value
+    assert " YnRvcA==" in app.code[3].value
 
 
 def test_bad_dsl_shows_error():

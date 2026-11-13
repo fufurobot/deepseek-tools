@@ -126,6 +126,8 @@ def run_pipeline(st, frontend, source, session="table_session", edits=None):
     st.code(dsl, language="text")
     st.subheader("Panes")
     st.code(script, language="bash")
+    st.subheader("DSL of the laid-out tables (what the CLI would parse)")
+    st.code(SECTIONS.join(tm.dsl_serialize(t) for t in tables), "text")
     if st.checkbox("Pixel boxes"):
         st.code(boxes or "(empty)", language="text")
     st.download_button("Download setup.sh", script, "setup.sh",

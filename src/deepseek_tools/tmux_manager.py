@@ -217,6 +217,20 @@ def _fmt(value):
     return f"{value:g}"
 
 
+def layout_sizes(info):
+    """Resolved integer sizes of both axes for a parsed table.
+
+    Returns ``(row_sizes, col_sizes)``; stored sizes win (they already
+    account for hints and the declared extent). Panes and pixel boxes both
+    work from these numbers, so they always agree."""
+    cols, rws = info.get("col_sizes"), info.get("row_sizes")
+    if cols is None or rws is None:
+        hints_c, hints_r = grid_size_hints(info["rows"])
+        cols = resolve_sizes(hints_c, info.get("_W"), "width")
+        rws = resolve_sizes(hints_r, info.get("_H"), "height")
+    return rws, cols
+
+
 def grid_size_hints(rows):
     """Turn table rows into per-axis ``(track, span, hint)`` lists.
     Percentages are divided across their span; absolute sizes are not.
@@ -824,13 +838,7 @@ def _pick_weights(info):
         return info["row_sizes"], info["col_sizes"]
     if "row_weights" in info and "col_weights" in info:
         return info["row_weights"], info["col_weights"]
-    if "row_sizes" not in info or "col_sizes" not in info:
-        # Tables from the pandoc path have no stored sizes yet: resolve the
-        # cell hints through resolve_sizes (handles px/em/%/'-').
-        cols, rws = grid_size_hints(info["rows"])
-        info["col_sizes"] = resolve_sizes(cols, info.get("_W"), "width")
-        info["row_sizes"] = resolve_sizes(rws, info.get("_H"), "height")
-    return info["row_sizes"], info["col_sizes"]
+    return layout_sizes(info)
     return compute_weights(info)
 
 
