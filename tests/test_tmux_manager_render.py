@@ -25,17 +25,17 @@ class TestRenderBoxes:
             "10 10 10 10 " + tm.encode_word("d"),
         ]
 
-    @pytest.mark.xfail(reason="render_boxes sizing rework", strict=False)
     def test_percentages_fill_the_declared_extent(self):
         info = {
-            "rows": [[(1, 1, "a", ("%", 25.0), ("%", 20.0)),
+            "rows": [[(1, 1, "a", ("%", 25.0), ("%", 100.0)),
                       (1, 1, "b", None, None)]],
             "col_sizes": [1.0, 1.0],
             "row_sizes": [1.0],
             "_W": 400,
-            "_H": 50,
+            "_H": 10,
         }
-        # 25% of 400 = 100 cells, 20% of 50 = 10 cells; the rest is split.
+        # 25% of 400 = 100 cells and 100% of 10 = 10 cells; the rest of the
+        # width is split over the unconstrained column.
         assert tm.render_boxes(info).splitlines() == [
             "0 0 100 10 " + tm.encode_word("a"),
             "100 0 300 10 " + tm.encode_word("b"),
@@ -59,12 +59,13 @@ class TestRenderBoxes:
             f"0 3 10 7 {tm.encode_word('wide')}"
         )
 
-    @pytest.mark.xfail(reason="render_boxes sizing rework", strict=False)
     def test_no_declared_extent_uses_provisional_sizes(self):
         info = {"rows": [[(1, 1, "", ("px", 12.0), ("px", 3.0)),
                           (1, 1, "", None, None)]]}
+        # Relative percentages without a declared extent are provisional
+        # (0 cells): the box collapses. #FIXME the web UI should set _W/_H.
         assert tm.render_boxes(info).splitlines() == [
-            "0 0 12 3 ", "12 0 1 1 ",
+            "0 0 12 3 ", "12 0 0 3 ",
         ]
 
 

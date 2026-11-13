@@ -973,6 +973,8 @@ def _axis_sizes(info, cells_info):
                                      cell[index + "span"])
         for cell in cells_info.values():
             hints.append((cell[index], spans[cell[index]], cell[key]))
+        # #FIXME a relative hint without a declared extent resolves to a
+        # provisional size; the CLI should fill _W/_H for HTML tables.
         if any(hint is not None for _, _, hint in hints):
             sizes[axis_name] = resolve_sizes(hints, info.get(extent_key),
                                              axis_name)
