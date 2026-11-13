@@ -70,3 +70,101 @@ class TestMainDslInput:
         path.write_text("", encoding="utf-8")
         with pytest.raises(ValueError, match="Empty DSL input"):
             _run(monkeypatch, [str(path)])
+
+
+class TestMainPandocInput:
+    def _table_ast(self):
+        cell = {"t": "Cell", "c": [["", [], []], {"t": "AlignDefault"}, 1, 1,
+                                  [{"t": "Para", "c": [{"t": "Str", "c": "x"}]}]]}
+        row = {"t": "Row", "c": ["", [cell]]}
+        table = {"t": "Table", "c": [
+            ["", [], []], ["", []], [],
+            {"t": "TableHead", "c": ["", []]},
+            [{"t": "TableBody", "c": ["", 0, [row], []]}],
+            {"t": "TableHead", "c": ["", []]},
+        ]}
+        return {"t": "Pandoc", "c": {"blocks": [table]}}
+
+    def test_html_merges_hints_and_debug_dump(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        path = tmp_path / "t.html"
+        path.write_text('<table><tr><td width="10%">x</td></tr></table>',
+                        encoding="utf-8")
+        seen = {}
+
+        def fake_pandoc_json(text, from_format):
+            seen["fmt"] = from_format
+            seen["text"] = text
+            return self._table_ast()
+
+        monkeypatch.setattr(tm, "pandoc_json", fake_pandoc_json)
+        _run(monkeypatch, [str(path), "--debug", "--emit", "boxes"])
+        captured = capsys.readouterr()
+        assert seen["fmt"] == "html"
+        assert seen["text"] == path.read_text(encoding="utf-8")
+        assert '"t": "Pandoc"' in captured.err
+        # The 10% width hint (the height falls back to 1) is merged in.
+        assert captured.out.splitlines()[0] == "0 0 10 1 " + tm.encode_word("x")
+
+    def test_no_debug_dump_by_default(self, monkeypatch, tmp_path, capsys):
+        path = tmp_path / "t.rst"
+        path.write_text("ignored", encoding="utf-8")
+        monkeypatch.setattr(tm, "pandoc_json", lambda text, fmt: self._table_ast())
+        _run(monkeypatch, [str(path)])
+        assert capsys.readouterr().err == ""
+
+    def test_html_without_tables_exits(self, monkeypatch, tmp_path):
+        path = tmp_path / "t.html"
+        path.write_text("<p>no tables</p>", encoding="utf-8")
+        monkeypatch.setattr(tm, "pandoc_json", lambda text, fmt: {"blocks": []})
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, [str(path)])
+        assert "No tables found in the input." in str(exc.value.code)
+
+    def test_multiple_tables_boxes_headers(self, monkeypatch, tmp_path, capsys):
+        ast = self._table_ast()
+        table = ast["c"]["blocks"][0]
+        monkeypatch.setattr(
+            tm, "pandoc_json", lambda text, fmt: {"c": [table, table]}
+        )
+        path = tmp_path / "t.rst"
+        path.write_text("ignored", encoding="utf-8")
+        _run(monkeypatch, [str(path), "--emit", "boxes"])
+        out = capsys.readouterr().out
+        assert out.startswith("# Table 1\n")
+        assert "\n# Table 2\n" in out
+
+    def test_single_table_has_no_boxes_header(self, monkeypatch, tmp_path, capsys):
+        path = tmp_path / "t.html"
+        path.write_text("ignored", encoding="utf-8")
+        monkeypatch.setattr(tm, "pandoc_json", lambda text, fmt: self._table_ast())
+        _run(monkeypatch, [str(path), "--emit", "boxes"])
+        assert "# Table" not in capsys.readouterr().out
+
+    def test_from_format_override(self, monkeypatch, tmp_path):
+        path = tmp_path / "t.dsl"
+        path.write_text(DSL, encoding="utf-8")
+        seen = {}
+
+        def fake_pandoc_json(text, from_format):
+            seen["fmt"] = from_format
+            return {"c": []}
+
+        monkeypatch.setattr(tm, "pandoc_json", fake_pandoc_json)
+        with pytest.raises(SystemExit):
+            _run(monkeypatch, [str(path), "--from", "html"])
+        assert seen["fmt"] == "html"
+
+    def test_rst_extension_uses_pandoc(self, monkeypatch, tmp_path):
+        path = tmp_path / "t.rest"
+        path.write_text("ignored", encoding="utf-8")
+        seen = {}
+
+        def fake_pandoc_json(text, from_format):
+            seen["fmt"] = from_format
+            return self._table_ast()
+
+        monkeypatch.setattr(tm, "pandoc_json", fake_pandoc_json)
+        _run(monkeypatch, [str(path), "--no-attach"])
+        assert seen["fmt"] == "rst"
