@@ -89,3 +89,20 @@ class TestAbsoluteMode:
         assert tm.resolve_sizes(_h(("px", 10.0), ("px", 10.0)), 100, "w") == [
             10.0, 10.0
         ]
+
+
+class TestMixedMode:
+    def test_percentage_caps_an_absolute_table(self):
+        # 10 + 10 absolute cells plus a 10% track and an unconstrained one:
+        # the table shrinks to 20 / (1 - 0.1) -> 23 cells (not 100), the
+        # percentage track takes 10% of that (2.3 -> 2) and the rest goes to
+        # the unconstrained track. Sizes still add up to the new total.
+        hint = _h(("px", 10.0), ("px", 10.0), ("%", 10))
+        assert tm.resolve_sizes(hint, 100, "w") == [10.0, 10.0, 2.0]
+
+    def test_absolute_overrides_a_smaller_percentage(self):
+        # The percentage of the free track is not fixed when the table
+        # shrinks: it becomes 0% of the smaller table rather than growing
+        # the absolute cells.
+        hint = _h(("px", 10.0), ("%", 50))
+        assert tm.resolve_sizes(hint, 100, "w") == [10.0, 10.0]
