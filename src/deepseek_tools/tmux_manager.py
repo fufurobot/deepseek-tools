@@ -1,23 +1,41 @@
 #!/usr/bin/env python3
 """
-table_to_tmux.py – Convert HTML / reStructuredText tables (and the
-Table Renderer DSL) into a tmux Bash script.
+tmux_manager.py - Turn HTML, reStructuredText or Table Renderer DSL tables
+into a tmux Bash script (and a pixel-box rendering for validation).
 
-Supported input formats:
-  * HTML       (via pandoc)
-  * RST        (via pandoc)
-  * DSL        (the line-based "Table Renderer" command language)
+Pipeline: every input frontend is parsed into the line-based Table Renderer
+DSL representation first (see ``to_dsl``), and all layout maths - weights,
+splits, boxes - then runs on that DSL. Adding a frontend only means adding
+a parser that produces cells; it never needs new layout code.
 
-Layout of each tmux window mirrors the visual grid of the table:
-rowspan/colspan are preserved, and width/height hints are used to
-weight the split percentages.
+Size units (``prop width`` / ``prop height`` and the HTML width/height
+attributes; must be deterministic, so only these two units exist):
+
+  * ``percentage`` / ``%``  - relative. A value is a fraction of the whole
+    table: 50 means 50% of W (columns) or of H (rows). A hint on a spanning
+    cell (colspan/rowspan k) is divided equally across its k tracks. After
+    all hints are placed, every unconstrained track shares what is left of
+    W/H equally. If hints over-commit (explicit total > W/H) the leftovers
+    are negative and an error is reported instead of splitting.
+  * ``pixels`` / ``px`` / ``em`` - absolute. Values are interpreted as an
+    absolute number of character cells (1em == 1px == 1 cell); they are
+    never scaled by W/H. A negative value is a *flexible* track: an exact
+    minus value (``-30px``) claims 30 cells when there is room, and a
+    bare ``-`` (``prop width - pixels``) absorbs all remaining space.
+    Table widths/heights therefore come from the absolute hints.
+    Conflicting absolute hints on the same track or over-sized tables
+    are reported as errors.
+
+All weights are resolved to absolute character counts before splitting, so
+pane percentages are stable and reproducible. Errors (see ``LayoutError``)
+are reported for conflicting or impossible constraints instead of guessing.
 
 Usage:
-    python table_to_tmux.py input.html
-    python table_to_tmux.py input.rst -o setup.sh
-    python table_to_tmux.py input.dsl -o setup.sh
-    cat table.dsl | python table_to_tmux.py - --from dsl
-    python table_to_tmux.py input.dsl --emit boxes     # spec pixel boxes
+    python -m deepseek_tools.tmux_manager input.html
+    python -m deepseek_tools.tmux_manager input.rst -o setup.sh
+    python -m deepseek_tools.tmux_manager input.dsl --emit boxes
+    python -m deepseek_tools.tmux_manager web [--port 8501]
+    cat table.dsl | python -m deepseek_tools.tmux_manager - --from dsl
 """
 
 import argparse
