@@ -305,7 +305,8 @@ def resolve_sizes(hints, total, axis):
     if flex:
         claimed[flex[0]] = bound - sum(
             v for v in claimed if v is not None)
-    elif free and abs(bound - used) >= 1:
+    elif abs(bound - used) >= 1:
+        # Absolute mode never invents space for unspecified tracks.
         raise LayoutError(
             f"{axis} absolute sizes need {_fmt(used)} cells but the table "
             f"provides {_fmt(bound)}; add a '-' flexible track or percentages")
