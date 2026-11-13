@@ -100,7 +100,7 @@ def run_pipeline(st, frontend, source, session="table_session"):
     st.code(dsl, language="text")
     st.subheader("Panes")
     st.code(script, language="bash")
-    if st.toggle("Pixel boxes"):
+    if st.checkbox("Pixel boxes"):
         st.code(boxes or "(empty)", language="text")
     st.download_button("Download setup.sh", script, "setup.sh",
                        "text/x-shellscript")
