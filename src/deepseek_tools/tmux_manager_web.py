@@ -64,3 +64,43 @@ def run(port=8501, **kwargs):
     st.set_page_config(page_title="tmux_manager", layout="wide")
     build(st)
     st.stop()
+
+
+
+
+def build(st):
+    """The whole Streamlit page. ``st`` is injected for testability."""
+    st.title("tmux_manager")
+    st.caption("HTML / RST / DSL tables -> DSL -> tmux panes. Absolute sizes "
+               "are character cells; percentages scale with the table.")
+    frontend = st.radio("Input", ["DSL", "HTML", "RST"], horizontal=True)
+    text = st.text_area("Table source", DEFAULT_DSL, height=180)
+    with st.expander("Quick start"):
+        st.markdown("`begin tr` starts a row, `begin td` a cell; "
+                    "`prop width 30 percentage`, `prop height 8 pixels`, "
+                    "`prop width - pixels` (flexible), `text <base64>`.")
+    if st.button("Convert", type="primary"):
+        run_pipeline(st, frontend.lower(), text)
+
+
+def run_pipeline(st, frontend, source, session="table_session"):
+    """Convert + parse + render, then show every output once."""
+    try:
+        dsl = dsl_from(frontend, source, "dsl" if frontend == "dsl" else None)
+        tables = docs(dsl)
+        for info in tables:
+            info.update(zip(("row_sizes", "col_sizes"),
+                            tm.compute_dsl_weights(info, info["_W"], info["_H"])))
+        boxes = preview(tables)
+        script = render(tables, session=session)
+    except (ValueError, tm.LayoutError) as exc:
+        st.error(f"{type(exc).__name__}: {exc}")
+        return
+    st.subheader("DSL")
+    st.code(dsl, language="text")
+    st.subheader("Panes")
+    st.code(script, language="bash")
+    if st.toggle("Pixel boxes"):
+        st.code(boxes or "(empty)", language="text")
+    st.download_button("Download setup.sh", script, "setup.sh",
+                       "text/x-shellscript")
