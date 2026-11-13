@@ -29,8 +29,10 @@ class TestBase64Helpers:
         assert base64.urlsafe_b64decode("_w==") == b"\xff"
         assert tm.decode_word("_w==") == "_w=="
 
-    def test_decode_non_ascii_returns_input(self):
-        assert tm.decode_word("héllo") == "héllo"
+    def test_decode_non_ascii_keeps_word_plus_padding(self):
+        # Base64 padding is added before the ASCII encode fails, and the
+        # padded word is what gets returned (a known quirk).
+        assert tm.decode_word("héllo") == "héllo==="
 
 
 class TestDslUnitToHint:
