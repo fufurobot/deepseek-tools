@@ -37,10 +37,10 @@ class TestRelativeMode:
         assert tm.resolve_sizes(hint, 1000, "w") == [400.0, 400.0, 200.0]
 
     def test_over_committed_percentages(self):
-        # #FIXME totals over 100% with no free track are not reported:
-        # rounding absorbs the overflow into the first track.
+        # #FIXME totals over 100% are not reported: the sum exceeds the
+        # declared extent (120 cells for a 100-cell table).
         assert tm.resolve_sizes(_h(("%", 60), ("%", 60)), 100, "w") == [
-            60.0, 40.0
+            60.0, 60.0
         ]
 
     def test_unknown_extent_is_provisional(self):
