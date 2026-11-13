@@ -99,7 +99,7 @@ class TestComputeWeights:
             "col_widths": None,
             "rows": [
                 [(1, 1, "a", ("px", 10.0), ("px", 2.0)),
-                 (1, 1, "b", None, ("px", 9.0))],
+                 (1, 1, "b", None, None)],
                 [(1, 1, "c", ("px", 30.0), None),
                  (1, 1, "d", ("px", 50.0), None)],
             ],
@@ -108,7 +108,8 @@ class TestComputeWeights:
         # The first span-1 hint for a track wins; later ones are ignored, so
         # column 1 keeps "b"'s hint rather than "c"'s.
         assert col_w == [10.0, 50.0]
-        assert row_w == [2.0, 9.0]
+        # Only "a" constrains its row; nothing hints at row 2.
+        assert row_w == [2.0, 1.0]
 
     def test_spanning_cells_do_not_donate_hints(self):
         info = {
