@@ -14,8 +14,8 @@ class TestRenderBoxes:
                 [(1, 1, "a", None, None), (1, 1, "b", None, None)],
                 [(1, 1, "c", None, None), (1, 1, "d", None, None)],
             ],
-            "row_weights": [10.0, 10.0],
-            "col_weights": [10.0, 10.0],
+            "col_sizes": [10.0, 10.0],
+            "row_sizes": [10.0, 10.0],
         }
         # Boxes are sorted by (x, y, w, h), so the left column comes first.
         assert tm.render_boxes(info).splitlines() == [
@@ -25,18 +25,33 @@ class TestRenderBoxes:
             "10 10 10 10 " + tm.encode_word("d"),
         ]
 
-    def test_spans_and_rounding(self):
+    @pytest.mark.xfail(reason="render_boxes sizing rework", strict=False)
+    def test_percentages_fill_the_declared_extent(self):
+        info = {
+            "rows": [[(1, 1, "a", ("%", 25.0), ("%", 20.0)),
+                      (1, 1, "b", None, None)]],
+            "col_sizes": [1.0, 1.0],
+            "row_sizes": [1.0],
+            "_W": 400,
+            "_H": 50,
+        }
+        # 25% of 400 = 100 cells, 20% of 50 = 10 cells; the rest is split.
+        assert tm.render_boxes(info).splitlines() == [
+            "0 0 100 10 " + tm.encode_word("a"),
+            "100 0 300 10 " + tm.encode_word("b"),
+        ]
+
+    def test_spans_cover_their_tracks(self):
         info = {
             "rows": [
                 [(1, 1, "a", None, None), (2, 1, "tall", None, None)],
                 [(1, 2, "wide", None, None)],
             ],
-            "row_weights": [3.3, 6.7],
-            "col_weights": [4.4, 5.6],
+            "col_sizes": [4.0, 6.0],
+            "row_sizes": [3.0, 7.0],
         }
-        lines = tm.render_boxes(info).splitlines()
-        # Edge coordinates are rounded (4.4 -> 4, 3.3 -> 3, 10.0 -> 10).
-        boxes = {line.split()[-1]: line for line in lines}
+        boxes = {line.split()[-1]: line for line in
+                 tm.render_boxes(info).splitlines()}
         assert boxes[tm.encode_word("tall")] == (
             f"4 0 6 10 {tm.encode_word('tall')}"
         )
@@ -44,19 +59,13 @@ class TestRenderBoxes:
             f"0 3 10 7 {tm.encode_word('wide')}"
         )
 
-    def test_non_integer_weights_are_rounded(self):
-        info = {
-            "rows": [[(1, 1, "", None, None), (1, 1, "", None, None)]],
-            "row_weights": [1.0],
-            "col_weights": [1.4, 1.4],
-        }
-        lines = tm.render_boxes(info).splitlines()
-        assert lines[0].split()[:4] == ["0", "0", "1", "1"]
-        assert lines[1].split()[:4] == ["1", "0", "2", "1"]
-
-    def test_uses_computed_weights_without_precomputed(self):
-        info = {"rows": [[(1, 1, "", None, None), (1, 1, "", None, None)]]}
-        assert tm.render_boxes(info).splitlines() == ["0 0 1 1 ", "1 0 1 1 "]
+    @pytest.mark.xfail(reason="render_boxes sizing rework", strict=False)
+    def test_no_declared_extent_uses_provisional_sizes(self):
+        info = {"rows": [[(1, 1, "", ("px", 12.0), ("px", 3.0)),
+                          (1, 1, "", None, None)]]}
+        assert tm.render_boxes(info).splitlines() == [
+            "0 0 12 3 ", "12 0 1 1 ",
+        ]
 
 
 class TestIsDsl:

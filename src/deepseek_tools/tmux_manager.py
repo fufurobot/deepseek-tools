@@ -271,29 +271,23 @@ def resolve_sizes(hints, total, axis):
         raise LayoutError(
             f"only one flexible '-' {axis} track is allowed, found {len(flex)}")
     if not absolute:
+        used = 0.0
         for t, p in enumerate(pct):
             if p is not None:
                 claimed[t] = extent * p / 100.0
-        used = sum(v for v in claimed if v is not None)
+                used += claimed[t]
         free = [t for t in range(tracks) if claimed[t] is None]
         if unknown:
             # The extent is not known yet (the web UI fills it in later):
             # percentages stay proportional, free tracks are 1 unit.
-            for t in free:
-                claimed[t] = 1.0
             return [v if v is not None else 1.0 for v in claimed]
-        if free:
-            share = (extent - used) / len(free)
-            if share < -1:
-                raise LayoutError(
-                    f"{axis} percentages need {_fmt(used)} cells but only "
-                    f"{_fmt(extent)} are available")
-            for t in free:
-                claimed[t] = share
-        elif abs(used - extent) >= 1 and not unknown:
+        share = (extent - used) / len(free) if free else 0.0
+        if share < -1:
             raise LayoutError(
                 f"{axis} percentages need {_fmt(used)} cells but only "
                 f"{_fmt(extent)} are available")
+        for t in free:
+            claimed[t] = share
         return _round_to(claimed, extent)
 
     if unknown:
@@ -928,17 +922,42 @@ def generate_tmux_script(tables, session_name="table_session", attach=True):
 # ======================================================================
 # 7. Spec-compliant pixel-box output (bonus, for validation)
 # ======================================================================
+def _axis_sizes(info, cells_info):
+    """Absolute cell sizes of both axes: the stored sizes from
+    :func:`compute_dsl_weights`, or the hints resolved again."""
+    axes = (("col", "w_hint", "col_sizes", "width", "_W"),
+            ("row", "h_hint", "row_sizes", "height", "_H"))
+    sizes = {}
+    for index, key, stored_key, axis_name, extent_key in axes:
+        stored = (info.get(stored_key)
+                  or compute_dsl_weights(info, info.get("_W"),
+                                         info.get("_H"))[
+                      1 if axis_name == "width" else 0])
+        spans = [1] * max([c[index] + 1 for c in cells_info.values()] or [0])
+        hints = []
+        for cell in cells_info.values():
+            spans[cell[index]] = max(spans[cell[index]],
+                                     cell[index + "span"])
+        for cell in cells_info.values():
+            hints.append((cell[index], spans[cell[index]], cell[key]))
+        if any(hint is not None for _, _, hint in hints):
+            sizes[axis_name] = resolve_sizes(hints, info.get(extent_key),
+                                             axis_name)
+        else:
+            sizes[axis_name] = list(stored)
+    return sizes["height"], sizes["width"]
+
+
 def render_boxes(info):
     rows = info["rows"]
     _, cells_info, max_row, max_col = _build_grid(rows)
 
-    row_w, col_w = _pick_weights(info)
-
+    row_sizes, col_sizes = _axis_sizes(info, cells_info)
     X = [0.0]
-    for w in col_w:
+    for w in col_sizes:
         X.append(X[-1] + w)
     Y = [0.0]
-    for h in row_w:
+    for h in row_sizes:
         Y.append(Y[-1] + h)
 
     x_int = [int(math.floor(x + 0.5)) for x in X]
