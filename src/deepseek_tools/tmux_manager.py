@@ -811,6 +811,9 @@ def _split_layout(pane_var, rect, cell_ids, cells_info,
 
         top_w = sum(row_weights[rect[0]:split_row]) or 1.0
         bot_w = sum(row_weights[split_row:rect[0] + rect[2]]) or 1.0
+        # A pane with no cells (e.g. a zero-sized track) cannot be split.
+        if min(top_w, bot_w) <= 0:
+            continue
         bot_pct = max(1, min(99, round(bot_w * 100.0 / (top_w + bot_w))))
 
         var_counter[0] += 1
@@ -842,6 +845,8 @@ def _split_layout(pane_var, rect, cell_ids, cells_info,
 
         left_w = sum(col_weights[rect[1]:split_col]) or 1.0
         right_w = sum(col_weights[split_col:rect[1] + rect[3]]) or 1.0
+        if min(left_w, right_w) <= 0:
+            continue
         right_pct = max(1, min(99, round(right_w * 100.0 / (left_w + right_w))))
 
         var_counter[0] += 1
