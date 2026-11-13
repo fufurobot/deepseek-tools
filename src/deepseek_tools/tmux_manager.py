@@ -878,12 +878,11 @@ def _split_layout(pane_var, rect, cell_ids, cells_info,
         if not top or not bot:
             continue
 
-        top_w = sum(row_weights[rect[0]:split_row]) or 1.0
-        bot_w = sum(row_weights[split_row:rect[0] + rect[2]]) or 1.0
-        # A pane with no cells (e.g. a zero-sized track) cannot be split.
-        if min(top_w, bot_w) <= 0:
+        top_w = sum(row_weights[rect[0]:split_row])
+        bot_w = sum(row_weights[split_row:rect[0] + rect[2]])
+        bot_pct, keep = _split_percent(top_w, bot_w, "row", split_row)
+        if not keep:
             continue
-        bot_pct = max(1, min(99, round(bot_w * 100.0 / (top_w + bot_w))))
 
         var_counter[0] += 1
         new_var = f"P{var_counter[0]}"
@@ -912,11 +911,11 @@ def _split_layout(pane_var, rect, cell_ids, cells_info,
         if not left or not right:
             continue
 
-        left_w = sum(col_weights[rect[1]:split_col]) or 1.0
-        right_w = sum(col_weights[split_col:rect[1] + rect[3]]) or 1.0
-        if min(left_w, right_w) <= 0:
+        left_w = sum(col_weights[rect[1]:split_col])
+        right_w = sum(col_weights[split_col:rect[1] + rect[3]])
+        right_pct, keep = _split_percent(left_w, right_w, "col", split_col)
+        if not keep:
             continue
-        right_pct = max(1, min(99, round(right_w * 100.0 / (left_w + right_w))))
 
         var_counter[0] += 1
         new_var = f"P{var_counter[0]}"
@@ -935,6 +934,23 @@ def _split_layout(pane_var, rect, cell_ids, cells_info,
     for cid in cell_ids:
         pane_map[cid] = pane_var
     return []
+
+
+def _split_percent(before, after, axis, at):
+    """Percentage for the second (bottom/right) pane of a split.
+
+    Returns ``(percent, keep)``. Sizes are absolute integer cells (see
+    :func:`resolve_sizes`), so the share is ``after / (before + after)``
+    rounded to a whole percent and clamped to 1..99. A split where one side
+    has no cells at all has nothing to show: ``keep`` is False and the split
+    is skipped (#FIXME such cells then share the other pane).
+    """
+    if before + after <= 0:
+        return 50, False
+    if min(before, after) <= 0:
+        return 50, False
+    percent = round(after * 100.0 / (before + after))
+    return max(1, min(99, int(percent))), True
 
 
 def generate_tmux_script(tables, session_name="table_session", attach=True):

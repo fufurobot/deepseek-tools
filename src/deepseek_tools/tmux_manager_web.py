@@ -30,11 +30,24 @@ end table
 """.format(editor=tm.encode_word("btop"), terminal=tm.encode_word("watch -n 2 nvidia-smi"))
 
 
+SECTIONS = "\n# ---\n"
+
+
+def _frontend(name):
+    """Lower-case the UI frontend name (``dsl`` passes through)."""
+    return name.lower()
+
+
 def dsl_from(name, text, from_format=None):
     """Convert any UI input into DSL text (``dsl`` passes through)."""
     if from_format is None:
         from_format = "dsl" if name == "dsl" else name
     return tm.to_dsl(text, from_format)
+
+
+def dsl_sections(text):
+    """Split DSL text into the per-table sections joined by to_dsl."""
+    return [chunk for chunk in text.split(SECTIONS) if chunk.strip()]
 
 
 def docs(text):
@@ -80,14 +93,24 @@ def build(st):
                     "`prop width 30 percentage`, `prop height 8 pixels`, "
                     "`prop width - pixels` (flexible), `text <base64>`.")
     if st.button("Convert", type="primary"):
-        run_pipeline(st, frontend.lower(), text)
+        run_pipeline(st, _frontend(frontend), text)
 
 
-def run_pipeline(st, frontend, source, session="table_session"):
-    """Convert + parse + render, then show every output once."""
+def run_pipeline(st, frontend, source, session="table_session",
+                 edits=None):
+    """Convert + parse + render, then show every output once.
+
+    ``edits`` is a list of replacement rows per table (from the size
+    editor) that is applied before the sizes are resolved again."""
     try:
         dsl = dsl_from(frontend, source, "dsl" if frontend == "dsl" else None)
-        tables = docs(dsl)
+        tables = dsl_sections(dsl)
+        infos = docs(dsl)
+        for i, rows in (edits or {}).items():
+            infos[i]["rows"] = rows
+            tables[i] = tm.dsl_serialize(infos[i])
+        dsl = SECTIONS.join(tables)
+        tables = [tm.parse_dsl(chunk) for chunk in tables]
         for info in tables:
             info.update(zip(("row_sizes", "col_sizes"),
                             tm.compute_dsl_weights(info, info["_W"], info["_H"])))
@@ -105,9 +128,10 @@ def run_pipeline(st, frontend, source, session="table_session"):
     st.download_button("Download setup.sh", script, "setup.sh",
                        "text/x-shellscript")
     if st.checkbox("Edit sizes (px/em = cells, % = relative, '-' = rest)"):
-        # #FIXME edits live only for this render; persisting them needs the
-        # result re-serialized into DSL and fed back as the input.
-        size_editor(st, tables[0])
+        rows = size_editor(st, tables[0])
+        st.caption("Edited table (feed this back as the DSL input or rerun "
+                   "Convert with the edits applied):")
+        st.code(tm.dsl_serialize({**tables[0], "rows": rows}), "text")
 
 
 UNITS = ["none", "percentage", "pixels", "flexible (-)"]

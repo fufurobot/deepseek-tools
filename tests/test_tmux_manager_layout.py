@@ -89,18 +89,18 @@ class TestBuildTableLayout:
         assert cmds[3].startswith('P4=$(tmux split-window -h -p 50 -t "${P3}"')
         assert pane_map == {0: "P0", 1: "P2", 2: "P1", 3: "P3", 4: "P4"}
 
-    def test_percentage_clamped(self):
+    def test_zero_sized_side_is_not_split(self):
+        # A 0-cell track has nothing to show: splitting it would create a
+        # 1% pane, so the split is skipped (#FIXME cells share the pane).
         _, _, cmds = tm.build_table_layout({
             "rows": [[(1, 1, "", None, None), (1, 1, "", None, None)]],
             "row_weights": [1.0],
             "col_weights": [1000.0, 0.0],
         })
-        # A zero-weighted right pane still keeps at least 1%.
-        assert cmds[-1].endswith('-p 1 -t "${P0}" -P -F "#{pane_id}")')
+        assert cmds == []
 
-    def test_zero_weights_fall_back_to_one(self):
-        # Weights that do not cover a slice sum to 0, which is treated as 1.
-        _, _, cmds = tm.build_table_layout({
+    def test_zero_weights_are_not_split(self):
+        _, pane_map, cmds = tm.build_table_layout({
             "rows": [
                 [(1, 1, "", None, None), (1, 1, "", None, None)],
                 [(1, 1, "", None, None), (1, 1, "", None, None)],
@@ -108,8 +108,8 @@ class TestBuildTableLayout:
             "row_weights": [0.0, 0.0],
             "col_weights": [0.0, 0.0],
         })
-        assert cmds[0].startswith('P1=$(tmux split-window -v -p 50')
-        assert cmds[1].startswith('P2=$(tmux split-window -h -p 50')
+        assert cmds == []
+        assert set(pane_map.values()) == {"P0"}
 
     def test_split_with_an_empty_side_is_skipped(self):
         # Rows 0-1 are one rowspan=2 cell and rows 2-3 are rowspan=3 cells,
@@ -143,3 +143,17 @@ class TestBuildTableLayout:
             "P9", (0, 0, 1, 1), [999], cells_info, [1.0], [1.0], [0], pane_map,
         ) == []
         assert pane_map == {999: "P9"}
+
+
+class TestSplitPercent:
+    def test_share_of_resolved_sizes(self):
+        assert tm._split_percent(30.0, 70.0, "col", 1) == (70, True)
+        assert tm._split_percent(1.0, 2.0, "row", 1) == (67, True)
+
+    def test_clamped_to_one_and_ninety_nine(self):
+        assert tm._split_percent(1000.0, 1.0, "col", 1) == (1, True)
+        assert tm._split_percent(1.0, 1000.0, "col", 1) == (99, True)
+
+    def test_empty_side_skips_the_split(self):
+        assert tm._split_percent(0.0, 0.0, "col", 1) == (50, False)
+        assert tm._split_percent(10.0, 0.0, "row", 1) == (50, False)
