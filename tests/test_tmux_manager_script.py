@@ -75,3 +75,7 @@ class TestGenerateTmuxScript:
             'P1=$(tmux split-window -h -p 50 -t "${P0}" -P -F "#{pane_id}")'
         )
         assert lines[send_idx + 1] == "# (0,1) 1x1"
+
+    def test_multiline_text_sent_as_single_key(self):
+        script = tm.generate_tmux_script([_one_cell_table("a\nb")], attach=False)
+        assert "'a\nb' C-m" in script
