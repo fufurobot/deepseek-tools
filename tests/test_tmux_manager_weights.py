@@ -108,8 +108,9 @@ class TestComputeWeights:
         # The first span-1 hint for a track wins; later ones are ignored, so
         # column 1 keeps "b"'s hint rather than "c"'s.
         assert col_w == [10.0, 50.0]
-        # Only "a" constrains its row; nothing hints at row 2.
-        assert row_w == [2.0, 1.0]
+        # Only "a" constrains its row; the missing row-2 hint is filled with
+        # the average of the present hints (2).
+        assert row_w == [2.0, 2.0]
 
     def test_spanning_cells_do_not_donate_hints(self):
         info = {
