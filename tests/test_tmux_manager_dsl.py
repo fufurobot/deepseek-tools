@@ -183,7 +183,9 @@ def test_rowspan_and_colspan_props_are_applied():
         [(1, 2, "", None, None), (1, 1, "", None, None)],
         [(1, 1, "", None, None), (1, 1, "", None, None)],
     ]
-    # The 2px colspan hint overflows the grid: max_col is the column cursor
-    # (3), so the third track receives the 10 - 2 remainder.
-    assert info["col_weights"] == [1.0, 1.0, 8.0]
+    # Tracks are derived from the grid cursor (3 columns here); the 2px hint
+    # is split over tracks 0-1 and the 8px remainder goes to the empty track
+    # 2, which no cell ever occupies.
+    first, second = 10.0 / 3, 10.0 / 3
+    assert info["col_weights"] == [first, second, 10.0 - 2 * first]
     assert info["row_weights"] == [5.0, 5.0]
