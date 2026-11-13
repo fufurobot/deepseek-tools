@@ -455,12 +455,41 @@ def encode_word(text):
     return base64.urlsafe_b64encode(text.encode("utf-8")).decode("ascii")
 
 
+ABSOLUTE_UNITS = frozenset({"pixels", "px", "em"})
+RELATIVE_UNITS = frozenset({"percentage", "%"})
+
+
+def _hint_unit(value):
+    """Normalise a unit token; absolute ``px``/``em`` collapse to ``px``
+    because both mean character cells."""
+    unit = str(value).strip().lower()
+    if unit in RELATIVE_UNITS:
+        return "%"
+    if unit in ABSOLUTE_UNITS:
+        return "px"
+    raise ValueError(f"Unknown DSL unit: {value!r}")
+
+
+def dsl_hint_text(hint):
+    """Canonical DSL rendering of a (unit, number) hint."""
+    if hint is None:
+        return ""
+    number = hint[1] if hint[1] == "-" else f"{hint[1]:g}"
+    unit = "percentage" if hint[0] == "%" else "pixels"
+    return f"{number} {unit}"
+
+
 def _dsl_unit_to_hint(unit, value):
-    if unit == "pixels":
-        return ("px", float(value))
-    if unit == "percentage":
-        return ("%", float(value))
-    raise ValueError(f"Unknown DSL unit: {unit!r}")
+    """Build a size hint. ``value`` is a number, a numeric string (pixels)
+    or ``"-"`` (flexible absolute track); percentages must be numeric."""
+    unit = _hint_unit(unit)
+    text = str(value).strip()
+    if text == "-" and unit == "px":
+        return ("px", "-")
+    if text == "-":
+        raise ValueError(f"'-' needs pixels/em, not {unit!r}")
+    number = int(text)
+    return (unit, float(number))
 
 
 def parse_dsl(text):
@@ -526,15 +555,13 @@ def parse_dsl(text):
             name, val, unit = parts[1], parts[2], parts[3]
             if current_cell is None:
                 raise ValueError(f"prop outside cell: {line!r}")
-            v = int(val)
             if name == "rowspan":
-                current_cell["rowspan"] = v
+                current_cell["rowspan"] = int(val)
             elif name == "colspan":
-                current_cell["colspan"] = v
-            elif name == "width":
-                current_cell["w_hint"] = _dsl_unit_to_hint(unit, v)
-            elif name == "height":
-                current_cell["h_hint"] = _dsl_unit_to_hint(unit, v)
+                current_cell["colspan"] = int(val)
+            elif name in ("width", "height"):
+                key = "w_hint" if name == "width" else "h_hint"
+                current_cell[key] = _dsl_unit_to_hint(unit, val)
             else:
                 raise ValueError(f"Unknown prop: {name}")
         elif cmd == "text":

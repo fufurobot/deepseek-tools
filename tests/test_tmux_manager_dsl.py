@@ -189,3 +189,41 @@ def test_rowspan_and_colspan_props_are_applied():
     first = 10.0 / 3
     assert info["col_weights"] == pytest.approx([first, first, first])
     assert info["row_weights"] == [5.0, 5.0]
+
+
+class TestDslSizeValues:
+    @pytest.mark.parametrize(
+        "unit,value,expected",
+        [
+            ("pixels", "12", ("px", 12.0)),
+            ("px", 5, ("px", 5.0)),
+            ("em", "-30", ("px", -30.0)),
+            ("pixels", "-", ("px", "-")),
+            ("percentage", "50", ("%", 50.0)),
+            ("%", 0, ("%", 0.0)),
+        ],
+    )
+    def test_hint_values(self, unit, value, expected):
+        assert tm._dsl_unit_to_hint(unit, value) == expected
+
+    @pytest.mark.parametrize("unit", ["percentage", "%"])
+    def test_flexible_marker_requires_absolute_units(self, unit):
+        with pytest.raises(ValueError, match="needs pixels"):
+            tm._dsl_unit_to_hint(unit, "-")
+
+    def test_hint_text_round_trip(self):
+        # "-" is the only token that reverses to text (the float does not).
+        for hint, text in [(None, ""), (("%", 50.0), "50 percentage"),
+                           (("px", "-"), "- pixels")]:
+            assert tm.dsl_hint_text(hint) == text
+            if text:
+                assert tm._dsl_unit_to_hint(*reversed(text.split())) == hint
+
+    def test_parse_dsl_keeps_flexible_hint_in_cells(self):
+        # The "-" marker parses, but the spec-style weight pass cannot use
+        # it yet (that arrives with the absolute-size resolver).
+        with pytest.raises(ValueError, match="could not convert string to float"):
+            tm.parse_dsl(
+                "800 600\nbegin tr\nbegin td\nprop width - pixels\n"
+                "end td\nend tr\n"
+            )
