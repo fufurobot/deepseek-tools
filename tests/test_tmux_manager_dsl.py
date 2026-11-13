@@ -175,14 +175,15 @@ class TestComputeDslWeights:
 
 def test_rowspan_and_colspan_props_are_applied():
     info = tm.parse_dsl(
-        "10 10\nbegin tr\nbegin td\nprop rowspan 2 pixels\n"
-        "prop colspan 3 pixels\n"
-        "end td\nbegin td\nend td\nbegin td\nend td\nbegin td\nend td\n"
-        "end tr\nend table\n"
+        "10 10\nbegin tr\nbegin td\nprop rowspan 1 pixels\n"
+        "prop colspan 2 pixels\nend td\nbegin td\nend td\nend tr\n"
+        "begin tr\nbegin td\nend td\nbegin td\nend td\nend tr\nend table\n"
     )
-    assert info["rows"] == [[(2, 3, "", None, None), (1, 1, "", None, None),
-                             (1, 1, "", None, None), (1, 1, "", None, None)]]
-    # The spans stick out of the 3x2 grid: only tracks 0-2 / 0-1 record the
-    # share (10 * 3 / 3 == 10 per column, 10 * 2 / 2 == 10 per row).
-    assert info["col_weights"] == [10.0, 10.0, 10.0]
-    assert info["row_weights"] == [10.0, 10.0]
+    assert info["rows"] == [
+        [(1, 2, "", None, None), (1, 1, "", None, None)],
+        [(1, 1, "", None, None), (1, 1, "", None, None)],
+    ]
+    # The 2px colspan hint overflows the grid: max_col is the column cursor
+    # (3), so the third track receives the 10 - 2 remainder.
+    assert info["col_weights"] == [1.0, 1.0, 8.0]
+    assert info["row_weights"] == [5.0, 5.0]
