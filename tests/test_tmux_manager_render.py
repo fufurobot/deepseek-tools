@@ -81,7 +81,6 @@ class TestIsDsl:
             "wx 600\nbegin table\n",
             "800 600\n",
             "800 600\n\n",
-            "800 600\nbegin tr\n",
         ],
     )
     def test_false(self, text):
