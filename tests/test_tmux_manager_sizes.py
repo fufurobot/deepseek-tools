@@ -30,11 +30,11 @@ class TestRelativeMode:
             400.0, 200.0, 200.0
         ]
 
-    def test_spanning_percentage_keeps_one_share_per_track(self):
-        # A colspan-2 percentage is one hint over two tracks: its share is
-        # identical on both tracks; the unconstrained track takes the rest.
+    def test_spanning_percentage_counts_once(self):
+        # A colspan-2 40% hint is 400 cells: the same 40% sits on both of its
+        # tracks, so the fixed part is 800 and the free track takes 200.
         hint = [(0, 2, ("%", 40.0)), (1, 1, None), (2, 1, None)]
-        assert tm.resolve_sizes(hint, 1000, "w") == [200.0, 200.0, 600.0]
+        assert tm.resolve_sizes(hint, 1000, "w") == [400.0, 400.0, 200.0]
 
     def test_over_committed_percentages_raise(self):
         with pytest.raises(tm.LayoutError, match="percentages need 120"):

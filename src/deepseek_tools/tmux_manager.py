@@ -252,6 +252,8 @@ def resolve_sizes(hints, total, axis):
         if hint is None:
             continue
         if hint[0] == "%":
+            # A spanning percentage is one hint: the same share on every
+            # track it covers (no double division).
             for t in range(track, min(tracks, track + span)):
                 pct[t] = float(hint[1])
         elif hint[1] == "-":
