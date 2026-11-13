@@ -179,6 +179,18 @@ class _HTMLCellAttrsExtractor(HTMLParser):
                 return default
 
         w_hint, h_hint = _extract_size_from_attrs(d)
+        # HTML width/height attributes are legacy pixels: a unitless number
+        # in them is an absolute character count, while a unitless CSS
+        # "width: 5" value is invalid and ignored. See README "Size units".
+        for attr, get_hint in (("width", 0), ("height", 1)):
+            value = (d.get(attr) or "").strip()
+            hint = (w_hint, h_hint)[get_hint]
+            if value.isdigit() and hint is not None:
+                hint = ("px", float(int(value)))
+            if attr == "width":
+                w_hint = hint
+            else:
+                h_hint = hint
         self.cells.append({
             "rowspan": _int(d.get("rowspan"), 1),
             "colspan": _int(d.get("colspan"), 1),
@@ -1016,7 +1028,7 @@ def _table_body(rows, widths=None):
 # unit are widest-practice pixels in browsers, but for a terminal layout a
 # bare number is read as characters - see README "Size units".
 def _html_sizes(html_source, tables):
-    """Attach hints parsed from the HTML attributes to the pandoc cells."""
+    """Attach the HTML width/height attributes to the pandoc cells."""
     parser = _HTMLCellAttrsExtractor()
     try:
         parser.feed(html_source)
@@ -1033,8 +1045,16 @@ def _html_sizes(html_source, tables):
                 idx += 1
                 if (cell["rowspan"], cell["colspan"]) != (rowspan, colspan):
                     return tables
-                row[i] = (rowspan, colspan, text,
-                          w_hint or cell["w_hint"], h_hint or cell["h_hint"])
+                # A colspan cell covers its whole row part; a legacy
+                # width=5 on it would give every covered column 2.5 cells,
+                # which is meaningless. Full width is the useful default.
+                # #TODO let the DSL/user override this per cell.
+                if colspan > 1:
+                    w_hint = ("%", 100.0)
+                else:
+                    w_hint = w_hint or cell["w_hint"]
+                h_hint = h_hint or cell["h_hint"]
+                row[i] = (rowspan, colspan, text, w_hint, h_hint)
     return tables
 
 
@@ -1070,6 +1090,14 @@ def to_dsl(text, from_format):
         for table in tables:
             table["_W"] = table.get("_W") or 80
             table["_H"] = table.get("_H") or 24
+            # Legacy width attributes (e.g. width=5) are absolute cells: a
+            # table made only of them has no room for an 80-cell assumption.
+            # #TODO make the assumed extent a --width/--height option.
+            if not any(c[3] is not None and c[3][0] == "%"
+                       for row in table["rows"] for c in row):
+                absolute = sum(c[3][1] for row in table["rows"]
+                               for c in row if c[3] is not None)
+                table["_W"] = min(table["_W"], max(1, int(absolute)))
             # #FIXME a cell without height hints fills the assumed 24 rows;
             # give unhinted axes one unit instead once the resolver supports
             # "provisional" per-axis extents.
