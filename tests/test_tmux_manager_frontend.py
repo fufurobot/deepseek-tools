@@ -46,3 +46,11 @@ def test_rst_colspec_widths_become_percentages(monkeypatch):
 def test_unknown_format_raises():
     with pytest.raises(ValueError):
         tm.to_dsl("x", "docx")
+
+
+def test_legacy_width_attribute_is_absolute(monkeypatch):
+    html = '<table><tr><td width=5>a</td></tr><tr><td>x</td></tr></table>'
+    ast = {"t": "Pandoc", "c": {"blocks": [
+        {"t": "Table", "c": tm._table_body([[("a", 1, 1)], [("x", 1, 1)]])}]}}
+    monkeypatch.setattr(tm, "pandoc_json", lambda text, fmt: ast)
+    assert "prop width 5 pixels" in tm.to_dsl(html, "html")

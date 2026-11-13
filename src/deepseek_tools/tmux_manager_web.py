@@ -104,3 +104,50 @@ def run_pipeline(st, frontend, source, session="table_session"):
         st.code(boxes or "(empty)", language="text")
     st.download_button("Download setup.sh", script, "setup.sh",
                        "text/x-shellscript")
+    if st.checkbox("Edit sizes (px/em = cells, % = relative, '-' = rest)"):
+        # #FIXME edits live only for this render; persisting them needs the
+        # result re-serialized into DSL and fed back as the input.
+        size_editor(st, tables[0])
+
+
+UNITS = ["none", "percentage", "pixels", "flexible (-)"]
+
+
+def _hint(st, key, hint, label):
+    """One size editor: unit select + number ('-' disables the number)."""
+    st.markdown(f"**{label}**")
+    current = "none" if hint is None else ("flexible (-)" if hint[1] == "-"
+                                           else "percentage" if hint[0] == "%"
+                                           else "pixels")
+    unit = st.selectbox(label, UNITS, index=UNITS.index(current),
+                        key=f"{key}_unit")
+    number = st.number_input("value", min_value=0, step=1,
+                             value=0 if hint is None or hint[1] == "-"
+                             else int(hint[1]), key=f"{key}_num")
+    if unit == "none":
+        return None
+    if unit.startswith("flexible"):
+        return ("px", "-")
+    return tm._dsl_unit_to_hint(unit, int(number))
+
+
+def size_editor(st, info):
+    """Edit every cell's span and sizes; returns the new rows."""
+    rows = []
+    for r, row in enumerate(info["rows"]):
+        for c, (rs, cs, text, w_hint, h_hint) in enumerate(row):
+            st.caption(f"cell ({r},{c}) {text!r}")
+            w_col, h_col, r_col, c_col = st.columns(4)
+            with w_col:
+                w = _hint(st, f"w_{r}_{c}", w_hint, f"width {r},{c}")
+            with h_col:
+                h = _hint(st, f"h_{r}_{c}", h_hint, f"height {r},{c}")
+            with r_col:
+                rs = st.number_input("rowspan", 1, 20, rs, key=f"rs_{r}_{c}")
+            with c_col:
+                cs = st.number_input("colspan", 1, 20, cs, key=f"cs_{r}_{c}")
+            rows.append((rs, cs, text, w, h))
+    # Cells are edited in row-major order and the table here is one row of
+    # cells on the common path; #TODO handle multi-row tables (needs a row
+    # breakbox in the editor).
+    return [tuple(rows)]
