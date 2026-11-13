@@ -1064,6 +1064,17 @@ def to_dsl(text, from_format):
         raise ValueError("No tables found in the input.")
     if from_format == "html":
         tables = _html_sizes(text, tables)
+        # #TODO HTML has no declared character size: a common 80x24 pane is
+        # assumed so relative hints have an extent (and #FIXME this should
+        # become a --width/--height option shared with the web UI).
+        for table in tables:
+            table["_W"] = table.get("_W") or 80
+            table["_H"] = table.get("_H") or 24
+            # #FIXME a cell without height hints fills the assumed 24 rows;
+            # give unhinted axes one unit instead once the resolver supports
+            # "provisional" per-axis extents.
+            if not any(c[4] is not None for row in table["rows"] for c in row):
+                table["_H"] = 1
     else:
         # Pandoc column widths (fractions of the table) are the RST
         # frontend's relative sizes; they become percentages.

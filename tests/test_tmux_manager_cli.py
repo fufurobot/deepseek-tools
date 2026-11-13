@@ -94,11 +94,10 @@ class TestMainPandocInput:
         monkeypatch.setattr(tm, "pandoc_json",
                             lambda text, fmt: self._table_ast())
         _run(monkeypatch, [str(path), "--emit", "boxes"])
-        # The HTML width hint is merged in. #FIXME a relative hint without
-        # a declared character width resolves to a provisional 0 cells, so
-        # the box only has its height.
+        # The HTML width hint is merged in: the 10% width rounds within the
+        # assumed 80-cell pane (#TODO make the assumption configurable).
         assert capsys.readouterr().out.splitlines()[0] == (
-            "0 0 0 1 " + tm.encode_word("x"))
+            "0 0 9 1 " + tm.encode_word("x"))
 
     def test_no_debug_dump_by_default(self, monkeypatch, tmp_path, capsys):
         path = tmp_path / "t.rst"
