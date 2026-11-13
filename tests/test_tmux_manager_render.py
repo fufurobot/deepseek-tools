@@ -29,8 +29,9 @@ class TestRenderBoxes:
         info = {
             "rows": [[(1, 1, "a", ("%", 25.0), ("%", 100.0)),
                       (1, 1, "b", None, None)]],
-            "col_sizes": [1.0, 1.0],
-            "row_sizes": [1.0],
+            # Stored sizes win, so the percentages are only hints.
+            "col_sizes": [100.0, 300.0],
+            "row_sizes": [10.0],
             "_W": 400,
             "_H": 10,
         }
@@ -59,13 +60,11 @@ class TestRenderBoxes:
             f"0 3 10 7 {tm.encode_word('wide')}"
         )
 
-    def test_no_declared_extent_uses_provisional_sizes(self):
+    def test_without_sizes_resolves_the_hints(self):
         info = {"rows": [[(1, 1, "", ("px", 12.0), ("px", 3.0)),
-                          (1, 1, "", None, None)]]}
-        # Relative percentages without a declared extent are provisional
-        # (0 cells): the box collapses. #FIXME the web UI should set _W/_H.
+                          (1, 1, "", ("px", 8.0), ("px", 3.0))]]}
         assert tm.render_boxes(info).splitlines() == [
-            "0 0 12 3 ", "12 0 0 3 ",
+            "0 0 12 3 ", "12 0 8 3 ",
         ]
 
 

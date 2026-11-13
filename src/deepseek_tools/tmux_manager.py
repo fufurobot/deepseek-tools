@@ -225,7 +225,12 @@ def layout_sizes(info):
     work from these numbers, so they always agree."""
     cols, rws = info.get("col_sizes"), info.get("row_sizes")
     if cols is None or rws is None:
+        # The extent of an axis is the larger of the declared size and the
+        # grid (a colspan can start past the last sized column).
+        _, _, max_row, max_col = _build_grid(info["rows"])
         hints_c, hints_r = grid_size_hints(info["rows"])
+        # An undeclared axis has no extent (None): absolute sizes then fix
+        # it, and relative hints stay provisional.
         cols = resolve_sizes(hints_c, info.get("_W"), "width")
         rws = resolve_sizes(hints_r, info.get("_H"), "height")
     return rws, cols
@@ -1021,31 +1026,9 @@ def generate_tmux_script(tables, session_name="table_session", attach=True):
 # 7. Spec-compliant pixel-box output (bonus, for validation)
 # ======================================================================
 def _axis_sizes(info, cells_info):
-    """Absolute cell sizes of both axes: the stored sizes from
-    :func:`compute_dsl_weights`, or the hints resolved again."""
-    axes = (("col", "w_hint", "col_sizes", "width", "_W"),
-            ("row", "h_hint", "row_sizes", "height", "_H"))
-    sizes = {}
-    for index, key, stored_key, axis_name, extent_key in axes:
-        stored = (info.get(stored_key)
-                  or compute_dsl_weights(info, info.get("_W"),
-                                         info.get("_H"))[
-                      1 if axis_name == "width" else 0])
-        spans = [1] * max([c[index] + 1 for c in cells_info.values()] or [0])
-        hints = []
-        for cell in cells_info.values():
-            spans[cell[index]] = max(spans[cell[index]],
-                                     cell[index + "span"])
-        for cell in cells_info.values():
-            hints.append((cell[index], spans[cell[index]], cell[key]))
-        # #FIXME a relative hint without a declared extent resolves to a
-        # provisional size; the CLI should fill _W/_H for HTML tables.
-        if any(hint is not None for _, _, hint in hints):
-            sizes[axis_name] = resolve_sizes(hints, info.get(extent_key),
-                                             axis_name)
-        else:
-            sizes[axis_name] = list(stored)
-    return sizes["height"], sizes["width"]
+    """Absolute cell sizes of both axes, from :func:`layout_sizes`."""
+    rows, cols = layout_sizes(info)
+    return rows, cols
 
 
 HTML_RELATIVE_ATTRS = ("width", "height")
@@ -1174,8 +1157,12 @@ def render_boxes(info):
     for h in row_sizes:
         Y.append(Y[-1] + h)
 
+    # Sizes are already whole cells; add the last edge so a span that
+    # reaches past the last sized track can still be clipped to the table.
     x_int = [int(math.floor(x + 0.5)) for x in X]
     y_int = [int(math.floor(y + 0.5)) for y in Y]
+    x_int.append(max(x_int) + 1)
+    y_int.append(max(y_int) + 1)
 
     boxes = []
     for cid, cell in cells_info.items():

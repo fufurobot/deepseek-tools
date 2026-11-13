@@ -22,8 +22,8 @@ HTML = """\
 <table>
 <tr><td rowspan=2>firefox</td><td>btop</td></tr>
 <tr><td>watch -n 0.2 nvidia-smi</td></tr>
-<tr><td width=5 colspan=2>pnpx @deepseek-ai/dsh web</td></tr>
-<tr><td width=5 colspan=2>uvx --from-requirements requirements.txt jupyterlab --ip 0.0.0.0</td></tr>
+<tr><td colspan=2>pnpx @deepseek-ai/dsh web</td></tr>
+<tr><td colspan=2>uvx --from-requirements requirements.txt jupyterlab --ip 0.0.0.0</td></tr>
 </table>
 
 </body>
@@ -36,10 +36,9 @@ pytestmark = pytest.mark.skipif(
 
 
 def _tables():
-    html = HTML
-    tables = tm.extract_tables(tm.pandoc_json(html, "html"))
-    assert len(tables) == 1
-    return tm.merge_html_hints(tables, html)
+    # Frontends go through to_dsl, exactly like the CLI and the web UI.
+    text = tm.to_dsl(HTML, "html")
+    return [tm.parse_dsl(chunk) for chunk in text.split("\n# ---\n")]
 
 
 def test_extracts_all_cell_texts():
@@ -57,7 +56,9 @@ def test_preserves_spans_and_width_hints():
     assert rows[0][0][:2] == (2, 1)
     assert rows[2][0][1] == 2
     assert rows[3][0][1] == 2
-    assert rows[2][0][3] == ("px", 5.0)
+    # A colspan cell covers its whole row part, so it is given full width
+    # instead of the meaningless legacy width=5 attribute.
+    assert rows[2][0][3] == ("%", 100.0)
 
 
 def test_generated_script_contains_every_command():
