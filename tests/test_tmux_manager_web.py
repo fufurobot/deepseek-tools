@@ -37,19 +37,18 @@ def test_dsl_sections_keeps_each_table():
     assert web.docs(two)[1]["rows"] == web.docs(web.DEFAULT_DSL)[0]["rows"]
 
 
-def test_edits_are_applied_before_sizing(monkeypatch):
-    seen = {}
+def test_run_pipeline_applies_size_edits():
+    lines = []
 
     class St:
         def __getattr__(self, name):
-            return lambda *a, **k: None
+            return lambda *a, **k: lines.append((name, a))
 
-    def fake_run_pipeline(st, frontend, source, session="table_session",
-                          edits=None):
-        seen["edits"] = edits
-
-    rows = [[(1, 1, "btop", ("px", 9.0), None)]]
-    info = web.docs(web.DEFAULT_DSL)[0]
-    info["rows"] = rows
-    text = tm.dsl_serialize(info)
-    assert "prop width 9 pixels" in text
+    edits = {0: [[(1, 1, "btop", ("px", 9.0), None),
+                  (1, 1, "watch -n 2 nvidia-smi", None, None)]]}
+    web.run_pipeline(St(), "dsl", web.DEFAULT_DSL, edits=edits)
+    dsl = next(a[0] for name, a in lines if name == "code")
+    assert "prop width 9 pixels" in dsl
+    # The download button receives the script as its data argument.
+    data = next(a[1] for name, a in lines if name == "download_button")
+    assert "send-keys" in data
