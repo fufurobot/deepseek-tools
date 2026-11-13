@@ -1179,18 +1179,15 @@ def main():
                     "Use --from to specify the Pandoc input format."
                 )
 
-    if from_format == "dsl":
-        tables = [parse_dsl(text)]
-    else:
-        ast = pandoc_json(text, from_format)
-        if args.debug:
-            json.dump(ast, sys.stderr, indent=2)
-            sys.stderr.write("\n")
-        tables = extract_tables(ast)
-        if not tables:
-            sys.exit("No tables found in the input.")
-        if from_format.startswith("html"):
-            tables = merge_html_hints(tables, text)
+    try:
+        # Every frontend is parsed into DSL text first, then laid out.
+        dsl_text = to_dsl(text, from_format)
+    except ValueError as exc:
+        sys.exit(str(exc))
+    tables = [parse_dsl(chunk) for chunk in dsl_text.split("\n# ---\n")
+              if chunk.strip()]
+    if not tables:
+        sys.exit("No tables found in the input.")
 
     if args.emit == "boxes":
         chunks = []

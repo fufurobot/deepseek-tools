@@ -65,11 +65,13 @@ class TestMainDslInput:
             _run(monkeypatch, [str(path)])
         assert exc.value.code == 2
 
-    def test_empty_dsl_raises(self, monkeypatch, tmp_path):
+    def test_empty_dsl_exits(self, monkeypatch, tmp_path):
         path = tmp_path / "t.dsl"
         path.write_text("", encoding="utf-8")
-        with pytest.raises(ValueError, match="Empty DSL input"):
+        # No table survives in the pipeline: main reports and exits.
+        with pytest.raises(SystemExit) as exc:
             _run(monkeypatch, [str(path)])
+        assert exc.value.code == 0
 
 
 class TestMainPandocInput:
