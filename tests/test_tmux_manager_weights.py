@@ -81,3 +81,50 @@ class TestFillWeights:
         assert tm.fill_weights([("px", 10.0), ("%", 20.0)], default=7.0) == [
             7.0, 7.0
         ]
+
+
+class TestComputeWeights:
+    def test_colspec_widths_take_priority(self):
+        info = {
+            "col_widths": [0.25, 0.75],
+            "rows": [[(1, 1, "a", ("px", 5.0), ("px", 5.0)),
+                      (1, 1, "b", None, None)]],
+        }
+        row_w, col_w = tm.compute_weights(info)
+        assert col_w == [25.0, 75.0]
+        assert row_w == [5.0]
+
+    def test_cell_hints_used_without_colspec(self):
+        info = {
+            "col_widths": None,
+            "rows": [
+                [(1, 1, "a", ("px", 10.0), ("px", 2.0)),
+                 (1, 1, "b", None, ("px", 9.0))],
+                [(1, 1, "c", ("px", 30.0), None),
+                 (1, 1, "d", ("px", 50.0), None)],
+            ],
+        }
+        row_w, col_w = tm.compute_weights(info)
+        # The first span-1 hint for a track wins; later ones are ignored, so
+        # column 1 keeps "b"'s hint rather than "c"'s.
+        assert col_w == [10.0, 50.0]
+        assert row_w == [2.0, 9.0]
+
+    def test_spanning_cells_do_not_donate_hints(self):
+        info = {
+            "col_widths": None,
+            "rows": [[(2, 1, "tall", None, ("px", 9.0)),
+                      (1, 2, "wide", ("px", 40.0), None)],
+                     [(1, 1, "x", None, None)]],
+        }
+        row_w, col_w = tm.compute_weights(info)
+        assert row_w == [1.0, 1.0]
+        assert col_w == [1.0, 1.0, 1.0]
+
+    def test_colspec_shorter_than_grid(self):
+        info = {
+            "col_widths": [0.5],
+            "rows": [[(1, 1, "a", None, None), (1, 1, "b", None, None)]],
+        }
+        _, col_w = tm.compute_weights(info)
+        assert col_w == [50.0, 50.0]
