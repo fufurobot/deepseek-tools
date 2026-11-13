@@ -18,6 +18,7 @@ My collection of deepseek-tools, built as a Python wheel.
 | `rwkv7-trainer` | `rwkv7_trainer` | RWKV-7 pretraining plus GRPO fine-tuning |
 | `pwcodegen` | `pwcodegen` | Playwright codegen in an isolated environment |
 | `deepseek-chat-export` | `deepseek_chat_export` | Export a chat.deepseek.com share page |
+| `tmux-manager` | `tmux_manager` | HTML / RST / Table Renderer DSL tables -> tmux panes (plus a Streamlit UI) |
 
 ## Setup
 
@@ -57,3 +58,21 @@ printing the secret:
 ```sh
 uv run python scripts/check_github_token.py
 ```
+
+## tmux-manager
+
+`python -m deepseek_tools.tmux_manager table.html -o setup.sh` turns a table
+into a tmux layout; `python -m deepseek_tools.tmux_manager web` opens the
+Streamlit editor. Every input (HTML, RST, DSL) is first converted to Table
+Renderer DSL text, then laid out.
+
+Size hints are either **relative** (`30 percentage` / `width="30%"`: a share
+of the whole pane, unconstrained tracks split the rest) or **absolute**
+(`12 pixels`, `3 em` / `width="12px"`: literal character cells; `-` or a
+negative value marks the flexible track that takes what is left). Mixing is
+allowed: percentages may only shrink an absolute table. Conflicting or
+incomplete hints raise a `LayoutError` instead of guessing.
+
+Known gaps (`#FIXME` in the code): a relative hint without a declared
+character width/height resolves to a provisional 0 cells in the CLI, and
+percentages totalling more than 100% are not reported.
