@@ -790,6 +790,13 @@ def _pick_weights(info):
         return info["row_sizes"], info["col_sizes"]
     if "row_weights" in info and "col_weights" in info:
         return info["row_weights"], info["col_weights"]
+    if "row_sizes" not in info or "col_sizes" not in info:
+        # Tables from the pandoc path have no stored sizes yet: resolve the
+        # cell hints through resolve_sizes (handles px/em/%/'-').
+        cols, rws = grid_size_hints(info["rows"])
+        info["col_sizes"] = resolve_sizes(cols, info.get("_W"), "width")
+        info["row_sizes"] = resolve_sizes(rws, info.get("_H"), "height")
+    return info["row_sizes"], info["col_sizes"]
     return compute_weights(info)
 
 
