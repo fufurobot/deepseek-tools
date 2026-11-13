@@ -86,3 +86,15 @@ class TestIsDsl:
     )
     def test_false(self, text):
         assert tm.is_dsl(text) is False
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # A second statement whose command is not "begin table" is still
+            # accepted: only the first statement after "W H" is inspected.
+            "800 600\nbegin table\n",
+            "800 600\nbegin td\n",
+        ],
+    )
+    def test_true_for_any_begin_after_header(self, text):
+        assert tm.is_dsl(text) is True
