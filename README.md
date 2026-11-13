@@ -63,16 +63,19 @@ uv run python scripts/check_github_token.py
 
 `python -m deepseek_tools.tmux_manager table.html -o setup.sh` turns a table
 into a tmux layout; `python -m deepseek_tools.tmux_manager web` opens the
-Streamlit editor. Every input (HTML, RST, DSL) is first converted to Table
-Renderer DSL text, then laid out.
+Streamlit editor (input pickers, size editors, DSL / script / pixel-box
+output and a download). Every input (HTML, RST, DSL) is first converted to
+Table Renderer DSL text, then laid out; panes and pixel boxes use the same
+resolved integer sizes.
 
 Size hints are either **relative** (`30 percentage` / `width="30%"`: a share
-of the whole pane, unconstrained tracks split the rest) or **absolute**
-(`12 pixels`, `3 em` / `width="12px"`: literal character cells; `-` or a
-negative value marks the flexible track that takes what is left). Mixing is
-allowed: percentages may only shrink an absolute table. Conflicting or
-incomplete hints raise a `LayoutError` instead of guessing.
+of the whole pane; unconstrained tracks split the rest; over 100% is an
+error) or **absolute** (`12 pixels`, `3 em`, HTML `width="12"`: literal
+character cells; `-` marks the flexible track taking what is left; absolute
+tables shrink to their sizes). Mixing is allowed: a percentage next to
+absolute sizes wins, growing the table so it can hold its share.
 
-Known gaps (`#FIXME` in the code): a relative hint without a declared
-character width/height resolves to a provisional 0 cells in the CLI, and
-percentages totalling more than 100% are not reported.
+Known gaps, marked `#FIXME`/`#TODO` in the code: the assumed 80x24 pane for
+HTML tables is not configurable yet, a pane side with zero cells shares its
+parent pane instead of being reported, and the tablet size editor handles
+one-row tables.
