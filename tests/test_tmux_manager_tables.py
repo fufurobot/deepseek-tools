@@ -108,3 +108,50 @@ class TestExtractTables:
 
     def test_empty_table_is_skipped(self):
         assert tm.extract_tables({"c": [{"t": "Table", "c": _table()}]}) == []
+
+
+class TestMergeHtmlHints:
+    def _tables(self):
+        return [{"rows": [[(1, 1, "a", None, None), (1, 2, "b", None, None)]]}]
+
+    def test_merges_hints(self):
+        tables = self._tables()
+        html = ('<table><tr><td width="10%">a</td>'
+                '<td colspan="2" style="height: 3em">b</td></tr></table>')
+        out = tm.merge_html_hints(tables, html)
+        assert out[0]["rows"][0] == [
+            (1, 1, "a", ("%", 10.0), None),
+            (1, 2, "b", None, ("em", 3.0)),
+        ]
+
+    def test_existing_hints_win(self):
+        tables = [{"rows": [[(1, 1, "a", ("px", 1.0), ("px", 2.0))]]}]
+        out = tm.merge_html_hints(tables, '<td width="10%">a</td>')
+        assert out[0]["rows"][0][0] == (1, 1, "a", ("px", 1.0), ("px", 2.0))
+
+    @pytest.mark.parametrize("html", [None, "", "<p>no cells</p>"])
+    def test_no_source_or_no_cells(self, html):
+        tables = self._tables()
+        assert tm.merge_html_hints(tables, html) is tables
+
+    def test_span_mismatch_aborts_merge(self):
+        tables = self._tables()
+        out = tm.merge_html_hints(tables, "<tr><td>x</td><td colspan=5>y</td></tr>")
+        assert out[0]["rows"][0][0][3] is None
+
+    def test_fewer_html_cells_than_table_cells(self):
+        tables = self._tables()
+        html = '<td width="1px">a</td><td colspan=2>b</td>'
+        out = tm.merge_html_hints(tables, html)
+        assert out[0]["rows"][0] == [
+            (1, 1, "a", ("px", 1.0), None),
+            (1, 2, "b", None, None),
+        ]
+
+    def test_parser_error_returns_tables(self, monkeypatch):
+        def boom(self, html_source):
+            raise RuntimeError("nope")
+
+        monkeypatch.setattr(tm._HTMLCellAttrsExtractor, "feed", boom)
+        tables = self._tables()
+        assert tm.merge_html_hints(tables, "<td>x</td>") is tables
