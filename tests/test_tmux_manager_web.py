@@ -52,3 +52,9 @@ def test_run_pipeline_applies_size_edits():
     # The download button receives the script as its data argument.
     data = next(a[1] for name, a in lines if name == "download_button")
     assert "send-keys" in data
+
+
+def test_pipeline_is_pure_and_serializable():
+    dsl, tables, boxes, script = web.pipeline("dsl", web.DEFAULT_DSL)
+    assert dsl == web.DEFAULT_DSL
+    assert "send-keys" in script and boxes

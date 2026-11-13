@@ -96,26 +96,29 @@ def build(st):
         run_pipeline(st, _frontend(frontend), text)
 
 
-def run_pipeline(st, frontend, source, session="table_session",
-                 edits=None):
-    """Convert + parse + render, then show every output once.
+def pipeline(frontend, source, edits=None):
+    """Full conversion used by the page and the tests.
 
-    ``edits`` is a list of replacement rows per table (from the size
-    editor) that is applied before the sizes are resolved again."""
+    Returns ``(dsl_text, tables, boxes, script)``; *edits* maps a table
+    index to replacement rows (as produced by :func:`size_editor`) and is
+    applied before the sizes are resolved again."""
+    dsl = dsl_from(frontend, source, "dsl" if frontend == "dsl" else None)
+    sections = dsl_sections(dsl)
+    for i, rows in (edits or {}).items():
+        info = tm.parse_dsl(sections[i], resolve=False)
+        info["rows"] = rows
+        sections[i] = tm.dsl_serialize(info)
+    dsl = SECTIONS.join(sections)
+    tables = [tm.parse_dsl(chunk) for chunk in sections]
+    return dsl, tables, preview(tables), render(tables)
+
+
+def run_pipeline(st, frontend, source, session="table_session", edits=None):
+    """Convert + parse + render, then show every output once."""
     try:
-        dsl = dsl_from(frontend, source, "dsl" if frontend == "dsl" else None)
-        tables = dsl_sections(dsl)
-        infos = docs(dsl)
-        for i, rows in (edits or {}).items():
-            infos[i]["rows"] = rows
-            tables[i] = tm.dsl_serialize(infos[i])
-        dsl = SECTIONS.join(tables)
-        tables = [tm.parse_dsl(chunk) for chunk in tables]
-        for info in tables:
-            info.update(zip(("row_sizes", "col_sizes"),
-                            tm.compute_dsl_weights(info, info["_W"], info["_H"])))
-        boxes = preview(tables)
-        script = render(tables, session=session)
+        dsl, tables, boxes, script = pipeline(frontend, source, edits)
+        if session != "table_session":
+            script = render(tables, session=session)
     except (ValueError, tm.LayoutError) as exc:
         st.error(f"{type(exc).__name__}: {exc}")
         return
