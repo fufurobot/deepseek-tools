@@ -33,5 +33,5 @@ def test_dsl_serialize_is_line_based_and_encodes_text():
 
 def test_parse_dsl_resolve_flag_skips_weights():
     text = "10 10\nbegin tr\nbegin td\nend td\nend tr\n"
-    assert tm.parse_dsl(text)["col_weights"] == [10.0]
+    assert tm.parse_dsl(text)["col_sizes"] == [10.0]
     assert "col_sizes" not in tm.parse_dsl(text, resolve=False)
