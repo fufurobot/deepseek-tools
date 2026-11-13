@@ -126,6 +126,6 @@ def test_size_editor_reports_edits():
             return 12 if label == "value" else value
 
     rows = w.size_editor(Stub(), web.docs(web.DEFAULT_DSL)[0])
-    assert rows == [[(1, 1, "btop", ("px", "-"), ("%", 12.0)),
+    assert rows == [((1, 1, "btop", ("px", "-"), ("%", 12.0)),
                      (1, 1, "watch -n 2 nvidia-smi", ("px", "-"),
-                      ("%", 12.0))]]
+                      ("%", 12.0)))]
