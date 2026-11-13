@@ -4,29 +4,36 @@ tmux_manager.py - Turn HTML, reStructuredText or Table Renderer DSL tables
 into a tmux Bash script (and a pixel-box rendering for validation).
 
 Pipeline: every frontend is parsed into Table Renderer DSL text first
-(:func:`to_dsl`), and all layout work runs on that DSL (parse_dsl ->
-resolve_sizes -> _split_layout). Adding a frontend only means teaching
-``to_dsl`` how to emit DSL cells; the layout never changes.
+(:func:`to_dsl`), then ``parse_dsl`` -> :func:`layout_sizes` ->
+``_split_layout``. Panes and pixel boxes both draw from the same integer
+sizes returned by :func:`layout_sizes`, so they always agree.
 
 Size units (``prop width``/``prop height`` in DSL, HTML width/height
-attributes, pandoc column widths). Only two kinds exist, both deterministic:
+attributes, pandoc column widths). Two kinds, both deterministic:
 
-  * Relative - ``prop ... 30 percentage`` / HTML ``width="30%"`` /
-    pandoc column widths: a fraction of the whole axis (30 = 30% of W for a
-    width, of H for a height). A percentage on a spanning cell is one hint:
-    the same share sits on every track it covers. Unconstrained tracks split
-    the remainder; rounding slack goes to the largest fractional parts so
-    the sizes always add up exactly.
-  * Absolute - ``... 12 pixels``, ``... 3 em`` or HTML ``width="12px"``:
+  * Relative - ``30 percentage`` / HTML ``width="30%"`` / pandoc column
+    widths: a fraction of the whole axis (30 = 30% of W for a width, of H
+    for a height). A percentage on a spanning cell is one hint: the same
+    share sits on every track it covers. Unconstrained tracks split the
+    remainder; rounding slack goes to the largest fractional parts, so the
+    sizes always add up exactly. Totals over 100% raise ``LayoutError``.
+  * Absolute - ``12 pixels``, ``3 em`` or HTML ``width="12"``/``"12px"``:
     12 character cells (1em == 1px == 1 cell), never scaled to the axis.
-    A negative value or ``-`` marks a *flexible* track that absorbs the rest
-    (one per axis). Absolute tables are laid out as declared (W x H cells);
-    sizes that do not add up, or two different sizes on one track, raise
+    ``-`` (or a negative value) marks the one *flexible* track per axis
+    that absorbs the rest. Absolute tables shrink to fit their sizes; the
+    declared W x H is an upper bound. Conflicting sizes on one track raise
     ``LayoutError``.
 
-Mixing: a percentage next to absolute sizes can only shrink the table, and
-is checked against the absolute sizes. Everything is resolved to integer
-cell counts before splitting, so pane percentages are stable.
+Mixing: a percentage next to absolute sizes wins: the table grows (or
+shrinks) so the percentage track can hold its share, unless that would
+drop an absolute track below its size. A percentage of the free space
+next to absolute sizes caps the table's width instead.
+
+HTML tables assume an 80x24 pane unless they carry only absolute sizes
+(#TODO: a --width/--height option). Cells of a colspan cell are given the
+full row width instead of a legacy ``width=5`` attribute (#TODO: override
+per cell). A pane whose side has zero cells is not split: its cells share
+the parent pane (#FIXME should become a report instead).
 
 Usage:
     python -m deepseek_tools.tmux_manager input.html
