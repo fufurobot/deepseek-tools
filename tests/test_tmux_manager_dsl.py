@@ -182,5 +182,7 @@ def test_rowspan_and_colspan_props_are_applied():
     )
     assert info["rows"] == [[(2, 3, "", None, None), (1, 1, "", None, None),
                              (1, 1, "", None, None), (1, 1, "", None, None)]]
-    assert info["col_weights"] == [10.0, 10.0, 10.0, 10.0]
-    assert info["row_weights"] == [5.0, 5.0]
+    # The spans stick out of the 3x2 grid: only tracks 0-2 / 0-1 record the
+    # share (10 * 3 / 3 == 10 per column, 10 * 2 / 2 == 10 per row).
+    assert info["col_weights"] == [10.0, 10.0, 10.0]
+    assert info["row_weights"] == [10.0, 10.0]
