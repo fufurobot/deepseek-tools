@@ -158,21 +158,16 @@ class TestComputeDslWeights:
         rows = [[(1, 2, "", ("px", 100.0), None), (1, 1, "", None, None)],
                 [(1, 1, "", None, None), (1, 1, "", None, None),
                  (1, 1, "", None, None)]]
-        # 100px = 50 cells over tracks 0-1; without a flexible track the
-        # remaining columns cannot be filled, so the table is rejected.
-        with pytest.raises(tm.LayoutError, match="flexible track"):
-            tm.compute_dsl_weights(self._info(rows), 400, 10)
+        # 100px = 50 cells over tracks 0-1; the other columns have no size.
+        _, col_w = tm.compute_dsl_weights(self._info(rows), 400, 10)
+        assert col_w == [50.0, 50.0, 0.0]
 
     def test_rowspan_hint_divided_across_tracks(self):
         rows = [[(1, 1, "", None, None), (2, 1, "", None, ("px", 100.0))],
                 [(1, 1, "", None, None), (1, 1, "", None, None)],
                 [(1, 1, "", None, None), (1, 1, "", None, None)]]
-        # 100px is 50 + 50 cells for rows 0-1; an absolute table needs the
-        # declared extent to match, so the 400-cell height is rejected.
-        with pytest.raises(tm.LayoutError, match="flexible track"):
-            tm.compute_dsl_weights(self._info(rows), 10, 400)
-        row_w, _ = tm.compute_dsl_weights(self._info(rows), 10, 100)
-        # Row 2 is never occupied, so it has no size.
+        # 100px is 50 + 50 cells for rows 0-1; row 2 has no size.
+        row_w, _ = tm.compute_dsl_weights(self._info(rows), 10, 400)
         assert row_w == [50.0, 50.0, 0.0]
 
     def test_all_tracks_constrained(self):

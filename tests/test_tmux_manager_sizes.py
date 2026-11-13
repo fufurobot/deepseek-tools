@@ -36,12 +36,9 @@ class TestRelativeMode:
         hint = [(0, 2, ("%", 40.0)), (1, 1, None), (2, 1, None)]
         assert tm.resolve_sizes(hint, 1000, "w") == [400.0, 400.0, 200.0]
 
-    def test_over_committed_percentages(self):
-        # #FIXME totals over 100% are not reported: the sum exceeds the
-        # declared extent (120 cells for a 100-cell table).
-        assert tm.resolve_sizes(_h(("%", 60), ("%", 60)), 100, "w") == [
-            60.0, 60.0
-        ]
+    def test_over_committed_percentages_raise(self):
+        with pytest.raises(tm.LayoutError, match="need 120 cells"):
+            tm.resolve_sizes(_h(("%", 60), ("%", 60)), 100, "w")
 
     def test_unknown_extent_is_provisional(self):
         assert tm.resolve_sizes(_h(("%", 50), ("%", 50)), None, "w") == [
@@ -82,15 +79,13 @@ class TestAbsoluteMode:
         with pytest.raises(tm.LayoutError, match="only one flexible"):
             tm.resolve_sizes(_h(("px", "-"), ("px", "-")), 10, "width")
 
-    def test_unassigned_absolute_track_raises(self):
-        with pytest.raises(tm.LayoutError, match="flexible track"):
-            tm.resolve_sizes(_h(("px", 10.0), None), 100, "width")
+    def test_absolute_table_shrinks_to_its_sizes(self):
+        # The declared 100 cells is an upper bound: the sizes describe a
+        # 20-cell table, and the unassigned track has no size.
+        assert tm.resolve_sizes(_h(("px", 10.0), ("px", 10.0)), 100, "w") == [
+            10.0, 10.0
+        ]
 
-    def test_absolute_hints_must_fill_the_table(self):
-        # 10 + 10 cells cannot describe a table declared 100 cells wide:
-        # there is no flexible track to take the other 80 cells.
-        with pytest.raises(tm.LayoutError, match="provides 100"):
-            tm.resolve_sizes(_h(("px", 10.0), ("px", 10.0)), 100, "w")
 
 
 class TestMixedMode:
@@ -108,10 +103,13 @@ class TestMixedMode:
         hint = _h(("px", 30.0), ("%", 50), ("px", "-"))
         assert tm.resolve_sizes(hint, 100, "w") == [30.0, 50.0, 20.0]
 
-    def test_absolute_and_percentage_over_commit(self):
+    def test_percentage_share_grows_the_table_beyond_the_declared_size(self):
+        # 70 absolute cells need 140 cells to give a 50% track its half; the
+        # declared 100 cannot fit that, so the percentage share wins.
         hint = _h(("px", 40.0), ("px", 30.0), ("%", 50))
-        with pytest.raises(tm.LayoutError, match="provides 100"):
-            tm.resolve_sizes(hint, 100, "w")
+        assert tm.resolve_sizes(hint, 100, "w") == [40.0, 30.0, 70.0]
+
+    def test_absolute_over_commit_raises(self):
         hint = _h(("px", 60.0), ("px", 60.0), ("px", "-"))
         with pytest.raises(tm.LayoutError, match="provides 100"):
             tm.resolve_sizes(hint, 100, "w")

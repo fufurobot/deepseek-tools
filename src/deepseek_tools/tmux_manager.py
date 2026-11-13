@@ -292,7 +292,7 @@ def resolve_sizes(hints, total, axis):
             # The extent is not known yet (the web UI fills it in later):
             # percentages stay proportional, free tracks are 1 unit.
             return [v if v is not None else 1.0 for v in claimed]
-        share = (extent - used) / len(free) if free else 0.0
+        share = (extent - used) / len(free) if free else extent - used
         if share < -1:
             raise LayoutError(
                 f"{axis} percentages need {_fmt(used)} cells but only "
@@ -319,24 +319,47 @@ def resolve_sizes(hints, total, axis):
         raise LayoutError(
             f"{axis} percentages leave no room for the absolute sizes")
     if not flex:
-        # No flexible track: the absolute and percentage sizes together must
-        # fill the axis exactly (nothing is invented for empty space).
+        # No flexible track: an absolute table shrinks to what its hints
+        # cover (the declared extent is only an upper bound), and the
+        # percentage tracks take their share of that smaller table.
         if percent > 0:
+            # The declared extent is honoured when the percentage track can
+            # hold its share of it; otherwise the percentage share wins.
+            if extent - used - extent * percent / 100.0 < -1e-9:
+                extent = max(extent, math.ceil(
+                    used / (1.0 - percent / 100.0)))
             for t in free:
                 claimed[t] = extent * (pct[t] or 0.0) / 100.0
-                used += claimed[t]
-        if abs(extent - used) >= 1:
-            raise LayoutError(
-                f"{axis} absolute sizes need {_fmt(used)} cells but the table "
-                f"provides {_fmt(extent)}; add a '-' flexible track")
-            extent = with_pct
+            used = sum(v for v in claimed if v is not None)
+            while extent - used < -1e-9:
+                extent += 1
         for t in fixed:
             claimed[t] = 0.0
+        total = sum(claimed)
+        if abs(extent - total) >= 1:
+            if total > extent + 1:
+                raise LayoutError(
+                    f"{axis} absolute sizes need {_fmt(total)} cells but "
+                    f"the table provides {_fmt(extent)}; add a '-' track")
+            extent = total          # the table shrinks to fit its sizes
         return _round_to(claimed, extent)
 
-    # A flexible '-' track absorbs the rest of the declared extent, after
-    # the percentage tracks took their (never more than declared) share.
+    # A flexible '-' track absorbs the rest. The table may grow past the
+    # declared extent so a percentage track can hold its share next to the
+    # absolute sizes; it never shrinks below them.
     if percent > 0:
+        # The declared extent is used when the percentage track can hold its
+        # share of it; otherwise the percentage share wins over the declared
+        # size (used / (1 - pct)), and the table never drops below its
+        # absolute sizes.
+        share = extent * percent / 100.0
+        need = math.ceil(used / (1.0 - percent / 100.0))
+        if need > extent:
+            extent = need
+        # Rounding may leave the share a cell short; grow until it fits.
+        while extent - used - extent * percent / 100.0 < -1e-9:
+            extent += 1
+        extent = max(extent, used)
         for t in free:
             claimed[t] = extent * (pct[t] or 0.0) / 100.0
     for t in fixed:
